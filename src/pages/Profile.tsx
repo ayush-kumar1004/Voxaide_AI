@@ -1,26 +1,17 @@
 // src/pages/Profile.tsx
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
-  User,
-  Building,
-  Mail,
-  Phone,
-  MapPin,
-  Calendar,
   Edit3,
   CheckCircle,
-  AlertCircle,
   Zap,
   Mic,
   ArrowLeft,
-  Camera,
-  Shield,
   Settings,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -44,45 +35,52 @@ interface ProfileData {
 
 const Profile = () => {
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<Partial<ProfileData>>({});
+  const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [profile, setProfile] = useState<ProfileData | null>(null);
-  const [formState, setFormState] = useState<Partial<ProfileData>>({});
-  const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        console.log("✅ Logged in UID:", user.uid);
+        try {
+          const docRef = doc(db, "users", user.uid);
+          const docSnap = await getDoc(docRef);
 
-useEffect(() => {
-  const auth = getAuth();
-  const unsubscribe = onAuthStateChanged(auth, async (user) => {
-    if (user) {
-      console.log("✅ Logged in UID:", user.uid);
-
-      const docRef = doc(db, "users", user.uid);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        const data = docSnap.data() as ProfileData;
-        console.log("✅ Profile data loaded:", data);
-        setProfile(data);
-        setFormState(data);
+          if (docSnap.exists()) {
+            const data = docSnap.data() as ProfileData;
+            console.log("✅ Profile data loaded:", data);
+            setProfileData(data);
+            setFormData(data);
+          } else {
+            console.log("❌ No profile found for this UID in Firestore");
+            toast({
+              title: "Profile not found",
+              description: "No profile information exists for this account.",
+              variant: "destructive",
+            });
+          }
+        } catch (error) {
+          console.error("Error fetching profile:", error);
+          toast({
+            title: "Error",
+            description: "Something went wrong while fetching profile.",
+            variant: "destructive",
+          });
+        } finally {
+          setLoading(false);
+        }
       } else {
-        console.log("❌ No profile found");
+        navigate("/login");
       }
+    });
+    return () => unsubscribe();
+  }, []);
 
-      setLoading(false);
-    } else {
-      navigate("/login");
-    }
-  });
-  return () => unsubscribe();
-}, []);
-
-
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
@@ -90,7 +88,7 @@ useEffect(() => {
   const handleSave = async () => {
     const auth = getAuth();
     const user = auth.currentUser;
-    if (!user || !formData) return;
+    if (!user) return;
 
     try {
       const userRef = doc(db, "users", user.uid);
@@ -99,6 +97,7 @@ useEffect(() => {
       setIsEditing(false);
       toast({ title: "Profile updated successfully." });
     } catch (error) {
+      console.error("Error updating profile:", error);
       toast({ title: "Failed to update profile", variant: "destructive" });
     }
   };
@@ -136,7 +135,9 @@ useEffect(() => {
     });
   };
 
-  if (!profileData) return <div className="p-6">Loading...</div>;
+  if (loading) return <div className="p-6">Loading...</div>;
+
+  if (!profileData) return <div className="p-6">No profile data found.</div>;
 
   return (
     <div className="min-h-screen bg-background">
