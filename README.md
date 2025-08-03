@@ -48,3 +48,45 @@ voxaide-main/
  ├── firebase.json
  ├── firestore.rules
  └── README.md
+```bash
+
+---
+---
+## Frontend Setup
+cd voxaide-main
+npm install
+npm run dev  # Development
+npm run build  # For production
+firebase deploy  # Deploy frontend to Firebase Hosting
+
+---
+## Backend Setup (Local or Render)
+
+cd voxaide-backend
+python -m venv venv
+source venv/bin/activate  # or venv\Scripts\activate on Windows
+pip install -r requirements.txt
+python app.py
+
+---
+
+## 🧪 Sample Use Cases
+- AI Customer Support for Startups
+- Order Resolution via Voice
+- Lead Generation via Contact Forms
+- AI Escalation to Human Agents
+
+---
+
+## 🤝 Contributing
+Open to PRs for additional features like:
+- Chat history UI
+- Admin dashboard
+- Live human chat fallback
+- Language localization
+
+---
+
+## 📜 License
+MIT License
+---
