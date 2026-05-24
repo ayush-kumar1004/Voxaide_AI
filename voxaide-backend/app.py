@@ -8,13 +8,12 @@ import json
 from dotenv import load_dotenv
 import uuid
 
-# Google Cloud & Vertex AI imports
-from google.cloud import texttospeech
-import vertexai
-from vertexai.generative_models import GenerativeModel, Part
+# Gemini API & gTTS imports
+import google.generativeai as genai
+from gtts import gTTS
 
 load_dotenv()
-print("🚀 Starting backend...")
+print("[Voxaide Backend] Starting backend...")
 
 app = Flask(__name__)
 # Enable CORS globally for local development and firebase hosting production URLs
@@ -37,10 +36,13 @@ cred = credentials.Certificate(key_file_path)
 initialize_app(cred)
 db = firestore.client()
 
-# Initialize Vertex AI SDK
-project_id = json.loads(firebase_key_json).get("project_id", "voxaide")
-vertexai.init(project=project_id, location="us-central1")
-generative_model = GenerativeModel("gemini-1.5-flash")
+# Initialize Gemini SDK
+gemini_api_key = os.environ.get("GEMINI_API_KEY")
+if not gemini_api_key:
+    # Fallback developer key
+    gemini_api_key = "AIzaSyAl7REwxLuEHlwBTSD0fx2r2eP5V2Q4weE"
+genai.configure(api_key=gemini_api_key)
+generative_model = genai.GenerativeModel("gemini-2.5-flash")
 
 
 # -------------------- SIGNUP --------------------
@@ -49,7 +51,7 @@ generative_model = GenerativeModel("gemini-1.5-flash")
 def signup():
     try:
         data = request.get_json()
-        print("🟢 Received JSON:", data)
+        print("[Signup] Received JSON:", data)
 
         if not data:
             return jsonify({'message': 'No data received'}), 400
@@ -70,7 +72,7 @@ def signup():
         if not password: missing_fields.append("password")
 
         if missing_fields:
-            print("🔴 Missing fields:", missing_fields)
+            print("[Signup] Missing fields:", missing_fields)
             return jsonify({
                 'message': 'Missing required fields',
                 'missingFields': missing_fields
@@ -79,7 +81,7 @@ def signup():
         # Check if user already exists
         user_query = db.collection('users').where('email', '==', email).limit(1).get()
         if user_query:
-            print(f"⚠️ User with email {email} already exists")
+            print(f"[Signup] User with email {email} already exists")
             return jsonify({'message': 'User already exists'}), 409
 
         # Add new user
@@ -92,11 +94,11 @@ def signup():
             'createdAt': datetime.now().strftime('%d %B %Y at %H:%M:%S UTC+5:30')
         })
 
-        print(f"✅ User {email} registered successfully.")
+        print(f"[Signup] User {email} registered successfully.")
         return jsonify({'message': 'User registered successfully'}), 200
 
     except Exception as e:
-        print("🔥 Error in /api/signup:", str(e))
+        print("[Signup] Error in /api/signup:", str(e))
         return jsonify({'message': 'Signup failed', 'error': str(e)}), 500
 
 # -------------------- LOGIN --------------------
@@ -153,8 +155,11 @@ def talk():
 
         audio_bytes = audio_file.read()
         
-        # 1. Feed audio directly to Gemini 1.5 Flash
-        audio_part = Part.from_data(data=audio_bytes, mime_type="audio/wav")
+        # 1. Feed audio directly to Gemini 2.5 Flash
+        audio_payload = {
+            "mime_type": "audio/wav",
+            "data": audio_bytes
+        }
         prompt = """
         You are Voxaide, a smart voice-enabled customer service AI assistant.
         Listen to the customer's audio input.
@@ -168,7 +173,7 @@ def talk():
         Do not include markdown code block formatting (like ```json) in your reply. Return ONLY raw JSON text.
         """
         
-        gemini_response = generative_model.generate_content([prompt, audio_part])
+        gemini_response = generative_model.generate_content([prompt, audio_payload])
         response_text = gemini_response.text.strip()
         
         # Parse the JSON response
@@ -188,30 +193,14 @@ def talk():
             transcription = "Voice message"
             ai_reply = response_text
         
-        # 2. Convert Gemini's text response to speech using Google Cloud Text-to-Speech
-        tts_client = texttospeech.TextToSpeechClient()
-        synthesis_input = texttospeech.SynthesisInput(text=ai_reply)
-        
-        # Build the voice request: select the Journey voice (high quality neural voice)
-        voice = texttospeech.VoiceSelectionParams(
-            language_code="en-US",
-            name="en-US-Journey-F"
-        )
-        
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.MP3
-        )
-        
-        tts_response = tts_client.synthesize_speech(
-            input=synthesis_input, voice=voice, audio_config=audio_config
-        )
+        # 2. Convert Gemini's text response to speech using gTTS
+        tts = gTTS(text=ai_reply, lang='en')
         
         # Save output MP3 file to static/audio directory
         os.makedirs("static/audio", exist_ok=True)
         filename = f"response_{uuid.uuid4().hex}.mp3"
         filepath = os.path.join("static", "audio", filename)
-        with open(filepath, "wb") as out:
-            out.write(tts_response.audio_content)
+        tts.save(filepath)
         
         # Construct the audio URL dynamically based on request host
         audio_url = f"{request.host_url}static/audio/{filename}"
@@ -223,7 +212,7 @@ def talk():
         }), 200
         
     except Exception as e:
-        print("🔥 Error in /talk:", str(e))
+        print("[Talk] Error in /talk:", str(e))
         return jsonify({'message': 'Processing failed', 'error': str(e)}), 500
 
 

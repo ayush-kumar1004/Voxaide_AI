@@ -5,5 +5,5 @@ python-dotenv
 bcrypt
 gunicorn
 firebase-admin
-google-cloud-texttospeech
-google-cloud-aiplatform
+google-generativeai
+gtts
