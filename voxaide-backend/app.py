@@ -16,8 +16,13 @@ load_dotenv()
 print("[Voxaide Backend] Starting backend...")
 
 app = Flask(__name__)
-# Enable CORS globally for local development and firebase hosting production URLs
-CORS(app, resources={r"/*": {"origins": ["http://localhost:8080", "https://voxaide.web.app"]}})
+# Enable CORS globally for all frontend origins
+CORS(app, resources={r"/*": {"origins": [
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "https://voxaide.web.app",
+    "https://voxaide-main.vercel.app"
+]}})
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -26,7 +31,7 @@ def health():
 
 firebase_key_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if not firebase_key_json:
-    raise Exception("❌ Environment variable for Firebase credentials not set!")
+    raise Exception("[ERROR] Environment variable for Firebase credentials not set!")
 
 # Set up local key file for Firebase authentication
 os.makedirs("keys", exist_ok=True)
