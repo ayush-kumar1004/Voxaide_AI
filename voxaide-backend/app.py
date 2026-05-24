@@ -23,14 +23,16 @@ firebase_key_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if not firebase_key_json:
     raise Exception("❌ Environment variable for Firebase credentials not set!")
 
-# Set up local key file for Google Cloud SDK authentication
+# Set up local key file for Firebase authentication
 os.makedirs("keys", exist_ok=True)
 key_file_path = os.path.abspath("keys/voxaide-service-account.json")
 with open(key_file_path, "w") as f:
     f.write(firebase_key_json)
 
-# Point GOOGLE_APPLICATION_CREDENTIALS to this file so Google client libraries auto-authenticate
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = key_file_path
+# Unset GOOGLE_APPLICATION_CREDENTIALS to prevent standard Google client libraries
+# from trying to use the Firebase service account key for the Gemini API.
+if "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
+    del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
 
 cred = credentials.Certificate(key_file_path)
 initialize_app(cred)
