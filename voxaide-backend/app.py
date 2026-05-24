@@ -19,6 +19,11 @@ app = Flask(__name__)
 # Enable CORS globally for local development and firebase hosting production URLs
 CORS(app, resources={r"/*": {"origins": ["http://localhost:8080", "https://voxaide.web.app"]}})
 
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "healthy", "version": "2.0.0-gemini-gtts"}), 200
+
+
 firebase_key_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 if not firebase_key_json:
     raise Exception("❌ Environment variable for Firebase credentials not set!")
