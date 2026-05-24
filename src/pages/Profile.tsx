@@ -141,7 +141,7 @@ const Profile = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="bg-gradient-hero border-b border-border">
+      <div className="bg-slate-900 border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
@@ -160,7 +160,7 @@ const Profile = () => {
                 <span className="text-xl font-bold text-white">Voxaide</span>
               </div>
             </div>
-            <Button variant="outline" size="sm" className="border-white/20 text-white hover:bg-white/10">
+            <Button variant="outline" size="sm" className="border-white/20 text-white bg-transparent hover:bg-white/10 hover:text-white">
               <Settings className="h-4 w-4 mr-2" />
               Settings
             </Button>

@@ -87,8 +87,10 @@ const CustomerChat = () => {
       const formData = new FormData();
       formData.append('audio', audioBlob, 'recording.wav');
 
-      // Replace with your backend URL
-      const response = await fetch('http://localhost:5000/talk', {
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const apiBaseUrl = isLocal ? 'http://localhost:5000' : 'https://voxaide-ai.onrender.com';
+
+      const response = await fetch(`${apiBaseUrl}/talk`, {
         method: 'POST',
         body: formData,
       });
@@ -157,7 +159,10 @@ const CustomerChat = () => {
 
   const resetSession = async () => {
     try {
-      await fetch('http://localhost:5000/reset', { method: 'POST' });
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const apiBaseUrl = isLocal ? 'http://localhost:5000' : 'https://voxaide-ai.onrender.com';
+
+      await fetch(`${apiBaseUrl}/reset`, { method: 'POST' });
       setMessages([{
         id: Date.now().toString(),
         type: 'bot',

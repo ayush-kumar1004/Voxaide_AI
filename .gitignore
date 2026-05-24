@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+.vercel
+
+# Firebase/Google keys & environment secrets
+.env
+.env.*
+keys/
+voxaide-backend/.env
+voxaide-backend/keys/

@@ -1,17 +1,46 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
-from flask_cors import CORS
 from firebase_admin import credentials, firestore, initialize_app
-from firestore import db
 from utils import hash_password, check_password
 from datetime import datetime
+import os
+import json
+from dotenv import load_dotenv
+import uuid
+
+# Google Cloud & Vertex AI imports
+from google.cloud import texttospeech
+import vertexai
+from vertexai.generative_models import GenerativeModel, Part
+
+load_dotenv()
 print("🚀 Starting backend...")
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:8080"])  # ✅ Allow frontend
-cred = credentials.Certificate("keys/voxaide-a16c10119181.json")  # ✅ Replace with your file name
+# Enable CORS globally for local development and firebase hosting production URLs
+CORS(app, resources={r"/*": {"origins": ["http://localhost:8080", "https://voxaide.web.app"]}})
+
+firebase_key_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+if not firebase_key_json:
+    raise Exception("❌ Environment variable for Firebase credentials not set!")
+
+# Set up local key file for Google Cloud SDK authentication
+os.makedirs("keys", exist_ok=True)
+key_file_path = os.path.abspath("keys/voxaide-service-account.json")
+with open(key_file_path, "w") as f:
+    f.write(firebase_key_json)
+
+# Point GOOGLE_APPLICATION_CREDENTIALS to this file so Google client libraries auto-authenticate
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = key_file_path
+
+cred = credentials.Certificate(key_file_path)
 initialize_app(cred)
 db = firestore.client()
+
+# Initialize Vertex AI SDK
+project_id = json.loads(firebase_key_json).get("project_id", "voxaide")
+vertexai.init(project=project_id, location="us-central1")
+generative_model = GenerativeModel("gemini-1.5-flash")
 
 
 # -------------------- SIGNUP --------------------
@@ -108,6 +137,100 @@ def contact():
 
     db.collection('contacts').add(contact_data)
     return jsonify({'success': True, 'message': 'Message received. We’ll get back to you soon.'})
+
+
+# -------------------- CUSTOMER CHAT VOICE SUPPORT --------------------
+@app.route('/talk', methods=['POST'])
+def talk():
+    try:
+        # Check if the post request has the file part
+        if 'audio' not in request.files:
+            return jsonify({'message': 'No audio file received'}), 400
+        
+        audio_file = request.files['audio']
+        if audio_file.filename == '':
+            return jsonify({'message': 'No selected file'}), 400
+
+        audio_bytes = audio_file.read()
+        
+        # 1. Feed audio directly to Gemini 1.5 Flash
+        audio_part = Part.from_data(data=audio_bytes, mime_type="audio/wav")
+        prompt = """
+        You are Voxaide, a smart voice-enabled customer service AI assistant.
+        Listen to the customer's audio input.
+        First, transcribe exactly what the customer said.
+        Second, generate a friendly, helpful, and concise response to the customer's query.
+        Return your answer as a JSON object with exactly two fields:
+        {
+          "transcription": "...",
+          "response": "..."
+        }
+        Do not include markdown code block formatting (like ```json) in your reply. Return ONLY raw JSON text.
+        """
+        
+        gemini_response = generative_model.generate_content([prompt, audio_part])
+        response_text = gemini_response.text.strip()
+        
+        # Parse the JSON response
+        try:
+            # Strip markdown block quotes if Gemini returns them
+            if response_text.startswith("```"):
+                lines = response_text.splitlines()
+                if lines[0].startswith("```json"):
+                    response_text = "\n".join(lines[1:-1])
+                elif lines[0].startswith("```"):
+                    response_text = "\n".join(lines[1:-1])
+            data = json.loads(response_text)
+            transcription = data.get("transcription", "")
+            ai_reply = data.get("response", "")
+        except Exception as parse_err:
+            print("Failed to parse Gemini response as JSON:", response_text, str(parse_err))
+            transcription = "Voice message"
+            ai_reply = response_text
+        
+        # 2. Convert Gemini's text response to speech using Google Cloud Text-to-Speech
+        tts_client = texttospeech.TextToSpeechClient()
+        synthesis_input = texttospeech.SynthesisInput(text=ai_reply)
+        
+        # Build the voice request: select the Journey voice (high quality neural voice)
+        voice = texttospeech.VoiceSelectionParams(
+            language_code="en-US",
+            name="en-US-Journey-F"
+        )
+        
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3
+        )
+        
+        tts_response = tts_client.synthesize_speech(
+            input=synthesis_input, voice=voice, audio_config=audio_config
+        )
+        
+        # Save output MP3 file to static/audio directory
+        os.makedirs("static/audio", exist_ok=True)
+        filename = f"response_{uuid.uuid4().hex}.mp3"
+        filepath = os.path.join("static", "audio", filename)
+        with open(filepath, "wb") as out:
+            out.write(tts_response.audio_content)
+        
+        # Construct the audio URL dynamically based on request host
+        audio_url = f"{request.host_url}static/audio/{filename}"
+        
+        return jsonify({
+            'user_message': transcription,
+            'response': ai_reply,
+            'audio_url': audio_url
+        }), 200
+        
+    except Exception as e:
+        print("🔥 Error in /talk:", str(e))
+        return jsonify({'message': 'Processing failed', 'error': str(e)}), 500
+
+
+@app.route('/reset', methods=['POST'])
+def reset_session():
+    # Stub response for resetting conversation session
+    return jsonify({'success': True, 'message': 'Session reset successfully.'}), 200
 
 
 if __name__ == '__main__':

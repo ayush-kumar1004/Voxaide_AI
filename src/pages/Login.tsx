@@ -5,8 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Eye, EyeOff, Mail, Lock, Zap, Mic } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { signInWithPopup } from "firebase/auth";
-import { auth, googleProvider, githubProvider } from "@/firebase"; // Adjust the path if needed
+import { signInWithPopup, signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, googleProvider, githubProvider, db } from "@/firebase"; // Adjust the path if needed
 
 
 const Login = () => {
@@ -24,44 +25,49 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:5000/api/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password
-        })
-      });
+      // ✅ Sign in with Firebase SDK directly
+      const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+      const firebaseUser = userCredential.user;
 
-      const data = await response.json();
+      // ✅ Fetch user details from Firestore
+      const userDocRef = doc(db, "users", firebaseUser.uid);
+      const userDocSnap = await getDoc(userDocRef);
 
-      if (!response.ok) {
-        throw new Error(data.message || "Login failed");
+      let userData = {
+        email: firebaseUser.email,
+        firstName: "",
+        lastName: "",
+        company: "",
+        accountType: "personal",
+        isLoggedIn: true
+      };
+
+      if (userDocSnap.exists()) {
+        const data = userDocSnap.data();
+        userData = {
+          email: data.email || firebaseUser.email,
+          firstName: data.firstName || "",
+          lastName: data.lastName || "",
+          company: data.company || "",
+          accountType: data.accountType || "personal",
+          isLoggedIn: true
+        };
       }
 
       // ✅ Save user info in localStorage
-      const user = data.user;
-      localStorage.setItem('user', JSON.stringify({
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        company: user.companyName,
-        accountType: "business",  // Optional - set dynamically if needed
-        isLoggedIn: true
-      }));
+      localStorage.setItem('user', JSON.stringify(userData));
 
       // ✅ Show toast
       toast({
         title: "Welcome back!",
-        description: data.message || "Successfully logged into your Voxaide dashboard."
+        description: "Successfully logged into your Voxaide dashboard."
       });
 
       // ✅ Redirect to home page
       navigate("/", { replace: true });
 
     } catch (error: any) {
+      console.error("Login error:", error);
       toast({
         title: "Login Failed",
         description: error.message || "Something went wrong.",

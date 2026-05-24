@@ -29,7 +29,10 @@ const handleSubmit = async (e: React.FormEvent) => {
       inquiryType: formData.inquiry
     };
 
-    const response = await fetch("http://localhost:5000/api/contact", {
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    const apiBaseUrl = isLocal ? "http://localhost:5000" : "https://voxaide-ai.onrender.com";
+
+    const response = await fetch(`${apiBaseUrl}/api/contact`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
