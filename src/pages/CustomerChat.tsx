@@ -87,6 +87,18 @@ const CustomerChat = () => {
       const formData = new FormData();
       formData.append('audio', audioBlob, 'recording.wav');
 
+      const userDataStr = localStorage.getItem('user');
+      let email = '';
+      if (userDataStr) {
+        try {
+          const userData = JSON.parse(userDataStr);
+          email = userData.email || '';
+        } catch (err) {
+          console.error('Failed to parse user data from localStorage', err);
+        }
+      }
+      formData.append('email', email);
+
       const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       const apiBaseUrl = isLocal ? 'http://localhost:5000' : 'https://voxaide-ai.onrender.com';
 
