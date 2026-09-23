@@ -1,10 +1,26 @@
+# --- Web framework ---
 Flask>=3.0,<4.0
 flask-cors>=4.0,<5.0
-google-cloud-firestore>=2.16,<3.0
-python-dotenv>=1.0,<2.0
-bcrypt>=4.0,<5.0
 gunicorn>=21.2,<23.0
-firebase-admin>=6.0,<7.0
-google-generativeai>=0.8,<1.0
-gtts>=2.5,<3.0
+
+# --- Config & utils ---
+python-dotenv>=1.0,<2.0
 requests>=2.31,<3.0
+pydantic>=2.5,<3.0
+
+# --- Auth ---
+bcrypt>=4.0,<5.0
+
+# --- Google / Firebase / Gemini ---
+firebase-admin>=6.0,<7.0
+google-cloud-firestore>=2.16,<3.0
+google-generativeai>=0.8,<1.0
+
+# --- RAG / Vector store ---
+chromadb>=0.5,<0.6
+
+# --- Text-to-Speech (fallback) ---
+gtts>=2.5,<3.0
+
+# NOTE: Twilio voice uses TwiML webhooks generated via xml.etree (stdlib),
+# so no `twilio` SDK package is required for the inbound call gateway.

@@ -7,6 +7,13 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.mp3
+
+
 node_modules
 dist
 dist-ssr
@@ -28,6 +35,21 @@ dist-ssr
 # Firebase/Google keys & environment secrets
 .env
 .env.*
+!.env.example
 keys/
 voxaide-backend/.env
+voxaide-backend/.env.*
+!voxaide-backend/.env.example
 voxaide-backend/keys/
+voxaide-backend/data/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+voxaide-backend/.venv/
+
+# Backups & scratch
+*.bak
+*.tar.gz
+_to_delete/
+Claude outputs/

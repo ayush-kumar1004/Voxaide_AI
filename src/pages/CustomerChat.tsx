@@ -24,10 +24,80 @@ const CustomerChat = () => {
     }
   ]);
   const [isLoading, setIsLoading] = useState(false);
+  const [textInput, setTextInput] = useState("");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  const handleSendTextMessage = async () => {
+    if (!textInput.trim() || isLoading) return;
+    const queryText = textInput.trim();
+    setTextInput("");
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      type: "user",
+      content: queryText,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setIsLoading(true);
+
+    try {
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const apiBaseUrl = isLocal ? 'http://localhost:5000' : 'https://voxaide-ai.onrender.com';
+
+      let companyId = "demo_company";
+      const userDataStr = localStorage.getItem('user');
+      if (userDataStr) {
+        try {
+          const ud = JSON.parse(userDataStr);
+          if (ud.company) companyId = ud.company.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+        } catch (e) {}
+      }
+
+      const response = await fetch(`${apiBaseUrl}/api/agent/companies/${companyId}/agent/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer dev_token_${companyId}`,
+          "X-Company-ID": companyId,
+          "X-Test-User-Id": `user_${companyId}`
+        },
+        body: JSON.stringify({
+          message: queryText,
+          synthesize_audio: true
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          type: "bot",
+          content: result.response || "Action completed.",
+          timestamp: new Date(),
+          audioUrl: result.audio_url
+        };
+        setMessages(prev => [...prev, botMessage]);
+        if (result.audio_url) {
+          playAudio(result.audio_url);
+        }
+      } else {
+        throw new Error("Failed to get response from server");
+      }
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Connection Error",
+        description: "Could not reach Voxaide AI agent. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -274,44 +344,68 @@ const CustomerChat = () => {
             </div>
 
             {/* Controls */}
-            <div className="border-t border-border p-6">
-              <div className="flex items-center justify-center space-x-4">
+            <div className="border-t border-border p-4 sm:p-6 space-y-4">
+              {/* Text Input Row */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Type a question (e.g. 'Can I book an appointment tomorrow at 10 AM?')..."
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !isLoading && handleSendTextMessage()}
+                  disabled={isLoading}
+                  className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+                <Button 
+                  onClick={handleSendTextMessage} 
+                  disabled={isLoading || !textInput.trim()}
+                  variant="hero"
+                  size="sm"
+                  className="px-4"
+                >
+                  <Send className="h-4 w-4 mr-1" /> Send
+                </Button>
+              </div>
+
+              {/* Voice Controls Row */}
+              <div className="flex items-center justify-center space-x-4 pt-1">
                 <Button
                   variant="outline"
                   size="icon"
                   onClick={resetSession}
                   disabled={isLoading}
+                  title="Reset Conversation"
                 >
                   <RotateCcw className="h-4 w-4" />
                 </Button>
                 
                 <Button
-                  variant={isRecording ? "destructive" : "hero"}
+                  variant={isRecording ? "destructive" : "outline"}
                   size="lg"
                   onClick={isRecording ? stopRecording : startRecording}
                   disabled={isLoading}
-                  className="min-w-32"
+                  className="min-w-36"
                 >
                   {isRecording ? (
                     <>
-                      <MicOff className="mr-2 h-5 w-5" />
-                      Stop
+                      <MicOff className="mr-2 h-5 w-5 animate-pulse" />
+                      Stop Recording
                     </>
                   ) : (
                     <>
-                      <Mic className="mr-2 h-5 w-5" />
-                      Speak
+                      <Mic className="mr-2 h-5 w-5 text-primary" />
+                      Speak Query
                     </>
                   )}
                 </Button>
 
-                <div className="text-xs text-muted-foreground text-center max-w-32">
+                <div className="text-xs text-muted-foreground text-center min-w-28">
                   {isRecording ? (
-                    <span className="text-destructive">Recording...</span>
+                    <span className="text-destructive font-medium">Recording voice...</span>
                   ) : isLoading ? (
-                    "Processing..."
+                    "Processing with AI..."
                   ) : (
-                    "Press to speak"
+                    "Or speak your query"
                   )}
                 </div>
               </div>
