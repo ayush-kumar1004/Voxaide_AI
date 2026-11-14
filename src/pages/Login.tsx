@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Eye, EyeOff, Mail, Lock, Zap, Mic } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { signInWithPopup, signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithPopup, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, googleProvider, githubProvider, db } from "@/firebase"; // Adjust the path if needed
 
@@ -84,6 +84,30 @@ const Login = () => {
       ...prev,
       [e.target.name]: e.target.value
     }));
+  };
+
+  const handleForgotPassword = async () => {
+    if (!formData.email.trim()) {
+      toast({
+        title: "Enter your email",
+        description: "Please type your email address above, then click 'Forgot your password?'.",
+        variant: "destructive"
+      });
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, formData.email.trim());
+      toast({
+        title: "Password Reset Sent",
+        description: `Instructions have been sent to ${formData.email}. Check your inbox.`
+      });
+    } catch (err: any) {
+      toast({
+        title: "Reset Failed",
+        description: err.message || "Could not send reset email.",
+        variant: "destructive"
+      });
+    }
   };
   const handleGoogleLogin = async () => {
   try {
@@ -190,6 +214,7 @@ const handleGitHubLogin = async () => {
                   id="password"
                   name="password"
                   type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
                   required
                   value={formData.password}
                   onChange={handleInputChange}
@@ -220,9 +245,13 @@ const handleGitHubLogin = async () => {
               </div>
 
               <div className="text-sm">
-                <Link to="/forgot-password" className="text-primary hover:text-primary-hover">
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  className="text-primary hover:text-primary-hover font-medium"
+                >
                   Forgot your password?
-                </Link>
+                </button>
               </div>
             </div>
 

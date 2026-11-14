@@ -241,6 +241,7 @@ try {
                       id="password"
                       name="password"
                       type={showPassword ? "text" : "password"}
+                      autoComplete="new-password"
                       required
                       value={formData.password}
                       onChange={handleInputChange}
@@ -267,6 +268,7 @@ try {
                       id="confirmPassword"
                       name="confirmPassword"
                       type="password"
+                      autoComplete="new-password"
                       required
                       value={formData.confirmPassword}
                       onChange={handleInputChange}
