@@ -63,8 +63,8 @@ const Login = () => {
         description: "Successfully logged into your Voxaide dashboard."
       });
 
-      // ✅ Redirect to home page
-      navigate("/", { replace: true });
+      // ✅ Redirect to dashboard
+      navigate("/dashboard", { replace: true });
 
     } catch (error: any) {
       console.error("Login error:", error);
@@ -102,7 +102,7 @@ const Login = () => {
       description: `Welcome, ${user.displayName}`
     });
 
-    navigate("/");
+    navigate("/dashboard");
   } catch (error: any) {
     toast({
       title: "Google Login Failed",
@@ -129,7 +129,7 @@ const handleGitHubLogin = async () => {
       description: `Welcome, ${user.displayName}`
     });
 
-    navigate("/");
+    navigate("/dashboard");
   } catch (error: any) {
     toast({
       title: "GitHub Login Failed",

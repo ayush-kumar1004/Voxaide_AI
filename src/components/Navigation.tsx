@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Menu, X, Mic, Zap, User, LogOut } from "lucide-react";
+import { Menu, X, Mic, Zap, User, LogOut, BarChart3 } from "lucide-react";
 
 const Navigation = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -69,6 +69,18 @@ const Navigation = () => {
                 <span className="text-sm text-muted-foreground">
                   Welcome, {user.firstName}
                 </span>
+                <Link to="/dashboard">
+                  <Button variant="outline" size="sm" className="font-medium">
+                    <BarChart3 className="h-4 w-4 mr-2 text-primary" />
+                    Dashboard
+                  </Button>
+                </Link>
+                <Link to="/customer-chat">
+                  <Button variant="ghost" size="sm">
+                    <Mic className="h-4 w-4 mr-2 text-accent" />
+                    Live Chat
+                  </Button>
+                </Link>
                 <Link to="/profile">
                   <Button variant="ghost" size="sm">
                     <User className="h-4 w-4 mr-2" />
@@ -130,6 +142,18 @@ const Navigation = () => {
                     <div className="px-2 py-1 text-sm text-muted-foreground">
                       Welcome, {user.firstName}
                     </div>
+                    <Link to="/dashboard" onClick={() => setIsOpen(false)}>
+                      <Button variant="outline" className="w-full justify-start font-medium">
+                        <BarChart3 className="h-4 w-4 mr-2 text-primary" />
+                        Dashboard
+                      </Button>
+                    </Link>
+                    <Link to="/customer-chat" onClick={() => setIsOpen(false)}>
+                      <Button variant="ghost" className="w-full justify-start">
+                        <Mic className="h-4 w-4 mr-2 text-accent" />
+                        Live Chat
+                      </Button>
+                    </Link>
                     <Link to="/profile" onClick={() => setIsOpen(false)}>
                       <Button variant="ghost" className="w-full justify-start">
                         <User className="h-4 w-4 mr-2" />
