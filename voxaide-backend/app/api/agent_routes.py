@@ -78,9 +78,12 @@ def company_chat(company_id: str):
 
     audio_url = None
     if want_audio and response.text:
+        base_url = request.host_url.rstrip("/")
+        if request.headers.get("X-Forwarded-Proto") == "https" or "onrender.com" in request.host:
+            base_url = base_url.replace("http://", "https://")
         audio_url = audio_service.synthesize_speech_url(
             text=response.text,
-            base_url=request.host_url
+            base_url=base_url
         )
 
     return jsonify({

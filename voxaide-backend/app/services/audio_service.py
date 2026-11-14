@@ -4,14 +4,17 @@ import requests
 from typing import Optional
 from app.core.logging import logger
 
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+DEFAULT_STATIC_AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio")
+
 class AudioService:
     """
     Unified Audio & Speech synthesis service.
     Decoupled from specific TTS vendors (ElevenLabs, gTTS, etc.).
     """
 
-    def __init__(self, static_audio_dir: str = "static/audio"):
-        self.static_audio_dir = static_audio_dir
+    def __init__(self, static_audio_dir: Optional[str] = None):
+        self.static_audio_dir = static_audio_dir or DEFAULT_STATIC_AUDIO_DIR
         os.makedirs(self.static_audio_dir, exist_ok=True)
 
     def synthesize_to_file(self, text: str, lang_code: str = "en", filename: Optional[str] = None) -> Optional[str]:

@@ -2,7 +2,7 @@ import os
 import json
 import uuid
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS, cross_origin
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -27,6 +27,18 @@ def create_app():
     @app.route('/health', methods=['GET'])
     def health():
         return jsonify({"status": "healthy", "version": "2.1.0-agent-orchestrator"}), 200
+
+    @app.route('/static/audio/<path:filename>', methods=['GET'])
+    @cross_origin()
+    def serve_static_audio(filename):
+        from app.services.audio_service import audio_service
+        try:
+            response = send_from_directory(audio_service.static_audio_dir, filename)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Cache-Control"] = "public, max-age=86400"
+            return response
+        except Exception as e:
+            return jsonify({"error": f"Audio file not found: {str(e)}"}), 404
 
     # Firebase Admin SDK Initialization
     db = None

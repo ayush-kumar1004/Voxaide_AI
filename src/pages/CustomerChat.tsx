@@ -220,21 +220,24 @@ const CustomerChat = () => {
   };
 
   const playAudio = async (audioUrl: string) => {
+    if (!audioUrl) return;
     try {
       setIsPlaying(true);
       const audio = new Audio(audioUrl);
+      audio.crossOrigin = 'anonymous';
       audio.onended = () => setIsPlaying(false);
-      audio.onerror = () => {
+      audio.onerror = (e) => {
         setIsPlaying(false);
+        console.warn('Audio playback error for URL:', audioUrl, e);
         toast({
-          title: "Audio Error",
-          description: "Could not play audio response.",
-          variant: "destructive"
+          title: "Audio Unavailable",
+          description: "Could not stream audio. Click 'Play Audio' to retry.",
+          variant: "default"
         });
       };
       await audio.play();
     } catch (error) {
-      console.error('Error playing audio:', error);
+      console.warn('Autoplay prevented or playback interrupted:', error);
       setIsPlaying(false);
     }
   };
