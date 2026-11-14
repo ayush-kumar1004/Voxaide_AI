@@ -56,6 +56,7 @@ def company_chat(company_id: str):
 
     data = request.get_json() or {}
     message = data.get("message", "").strip()
+    agent_id = data.get("agent_id")
     conversation_id = data.get("conversation_id")
     channel = data.get("channel", "web_text")
     want_audio = data.get("synthesize_audio", False)
@@ -67,6 +68,7 @@ def company_chat(company_id: str):
 
     agent_request = AgentRequest(
         company_id=company_id,
+        agent_id=agent_id,
         message=message,
         conversation_id=conversation_id,
         user_id=user_id,
@@ -95,3 +97,61 @@ def company_chat(company_id: str):
         "should_escalate": response.should_escalate,
         "latency_ms": response.latency_ms
     }), 200
+
+# ----------------- MULTI-AGENT STUDIO ROUTES -----------------
+@agent_bp.route("/companies/<company_id>/agents", methods=["GET"])
+@require_auth
+@require_company_access("company_id")
+def list_company_agents(company_id: str):
+    from app.services.company_service import company_service
+    agents = company_service.list_agents(company_id)
+    return jsonify({
+        "success": True,
+        "agents": [a.model_dump() for a in agents]
+    }), 200
+
+@agent_bp.route("/companies/<company_id>/agents", methods=["POST"])
+@require_auth
+@require_company_access("company_id")
+def create_company_agent(company_id: str):
+    from app.services.company_service import company_service
+    data = request.get_json() or {}
+    name = data.get("agent_name", "").strip()
+    if not name:
+        return jsonify({"success": False, "error": "Agent name is required."}), 400
+
+    agent = company_service.create_agent(company_id, **data)
+    return jsonify({
+        "success": True,
+        "agent": agent.model_dump(),
+        "message": f"Agent '{agent.agent_name}' created successfully."
+    }), 201
+
+@agent_bp.route("/companies/<company_id>/agents/<agent_id>", methods=["GET"])
+@require_auth
+@require_company_access("company_id")
+def get_company_agent(company_id: str, agent_id: str):
+    from app.services.company_service import company_service
+    agent = company_service.get_agent(company_id, agent_id=agent_id)
+    return jsonify({"success": True, "agent": agent.model_dump()}), 200
+
+@agent_bp.route("/companies/<company_id>/agents/<agent_id>", methods=["PUT"])
+@require_auth
+@require_company_access("company_id")
+def update_company_agent(company_id: str, agent_id: str):
+    from app.services.company_service import company_service
+    data = request.get_json() or {}
+    updated = company_service.update_agent(company_id, agent_id, **data)
+    if not updated:
+        return jsonify({"success": False, "error": "Agent not found."}), 404
+    return jsonify({"success": True, "agent": updated.model_dump(), "message": "Agent updated."}), 200
+
+@agent_bp.route("/companies/<company_id>/agents/<agent_id>", methods=["DELETE"])
+@require_auth
+@require_company_access("company_id")
+def delete_company_agent(company_id: str, agent_id: str):
+    from app.services.company_service import company_service
+    success = company_service.delete_agent(company_id, agent_id)
+    if not success:
+        return jsonify({"success": False, "error": "Cannot delete agent or agent not found."}), 400
+    return jsonify({"success": True, "message": "Agent deleted successfully."}), 200

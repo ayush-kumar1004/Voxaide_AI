@@ -30,7 +30,11 @@ import {
   Database,
   Link2,
   ShieldCheck,
-  Check
+  Check,
+  Code,
+  Copy,
+  CheckCheck,
+  Play
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -364,6 +368,98 @@ const Dashboard = () => {
     }
   };
 
+  // Multi-Agent State
+  const [agents, setAgents] = useState<any[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("agent_support_01");
+  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+  const [newAgent, setNewAgent] = useState({
+    agent_name: "",
+    role: "Inbound Sales",
+    voice_model: "en-US-JennyNeural",
+    greeting: "Hello! How can I help you today?",
+    system_instructions: "You are an AI assistant. Answer inquiries politely and accurately using company knowledge.",
+    allowed_tables: ["orders", "products"]
+  });
+
+  // Embed Widget State
+  const [widgetTheme, setWidgetTheme] = useState("#2563EB");
+  const [widgetTitle, setWidgetTitle] = useState("VoxAide Support");
+  const [copiedScript, setCopiedScript] = useState(false);
+
+  const loadAgents = async (targetCompany = companyId) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/agent/companies/${targetCompany}/agents`, {
+        headers: getHeaders(targetCompany)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAgents(data.agents || []);
+        if (data.agents && data.agents.length > 0 && !selectedAgentId) {
+          setSelectedAgentId(data.agents[0].agent_id);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not load agents", err);
+    }
+  };
+
+  const handleCreateAgent = async () => {
+    if (!newAgent.agent_name.trim()) {
+      toast({ title: "Name Required", description: "Please enter an agent name.", variant: "destructive" });
+      return;
+    }
+    setIsCreatingAgent(true);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/agent/companies/${companyId}/agents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getHeaders(companyId) },
+        body: JSON.stringify(newAgent)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast({ title: "Agent Created!", description: `${data.agent.agent_name} is active.` });
+        setNewAgent({
+          agent_name: "",
+          role: "Technical Support",
+          voice_model: "en-US-JennyNeural",
+          greeting: "Hello! How can I help you today?",
+          system_instructions: "You are an AI assistant. Answer inquiries politely and accurately.",
+          allowed_tables: ["orders"]
+        });
+        loadAgents(companyId);
+      } else {
+        toast({ title: "Error", description: data.error || "Could not create agent.", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to create agent.", variant: "destructive" });
+    } finally {
+      setIsCreatingAgent(false);
+    }
+  };
+
+  const handleDeleteAgent = async (agentId: string) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/agent/companies/${companyId}/agents/${agentId}`, {
+        method: "DELETE",
+        headers: getHeaders(companyId)
+      });
+      if (res.ok) {
+        toast({ title: "Agent Deleted", description: "Removed agent from workspace." });
+        loadAgents(companyId);
+      }
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to delete agent.", variant: "destructive" });
+    }
+  };
+
+  const copyWidgetScript = () => {
+    const scriptTag = `<script src="${apiBaseUrl}/widget.js" data-company-id="${companyId}" data-agent-id="${selectedAgentId || 'agent_support_01'}" data-theme="${widgetTheme}" data-title="${widgetTitle}" async></script>`;
+    navigator.clipboard.writeText(scriptTag);
+    setCopiedScript(true);
+    toast({ title: "Snippet Copied!", description: "Paste this code into any website before </body>." });
+    setTimeout(() => setCopiedScript(false), 2500);
+  };
+
   const refreshAll = (targetCompany = companyId) => {
     loadDocuments(targetCompany);
     loadAppointments(targetCompany);
@@ -371,6 +467,7 @@ const Dashboard = () => {
     loadAnalytics(targetCompany);
     loadTelephony(targetCompany);
     loadDbConnector(targetCompany);
+    loadAgents(targetCompany);
   };
 
   useEffect(() => {
@@ -660,20 +757,280 @@ const Dashboard = () => {
           </div>
 
           {/* Navigation Tabs */}
-          <Tabs defaultValue="knowledge" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-2 md:grid-cols-7 h-auto p-1">
-              <TabsTrigger value="knowledge">Knowledge Base</TabsTrigger>
-              <TabsTrigger value="connectors">
-                <Database className="h-3.5 w-3.5 mr-1" /> Database
+          <Tabs defaultValue="agents" className="space-y-6">
+            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 h-auto p-1 gap-1">
+              <TabsTrigger value="agents">
+                <Bot className="h-3.5 w-3.5 mr-1" /> Agents
               </TabsTrigger>
+              <TabsTrigger value="widget">
+                <Code className="h-3.5 w-3.5 mr-1" /> Web Widget
+              </TabsTrigger>
+              <TabsTrigger value="knowledge">Knowledge</TabsTrigger>
+              <TabsTrigger value="connectors">Database</TabsTrigger>
               <TabsTrigger value="appointments">Appointments</TabsTrigger>
-              <TabsTrigger value="conversations">Conversations</TabsTrigger>
-              <TabsTrigger value="analytics">Analytics</TabsTrigger>
+              <TabsTrigger value="conversations">Inbox</TabsTrigger>
               <TabsTrigger value="telephony">Phone & Voice</TabsTrigger>
               <TabsTrigger value="test_agent" className="text-primary font-semibold">
                 <Sparkles className="h-3.5 w-3.5 mr-1 text-primary" /> Test Agent
               </TabsTrigger>
             </TabsList>
+
+            {/* Multi-Agent Studio Tab */}
+            <TabsContent value="agents" className="space-y-6">
+              <Card className="p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b border-border">
+                  <div>
+                    <h2 className="text-xl font-semibold">Multi-Agent Studio</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Configure department-specific autonomous AI bots for sales, technical support, and scheduling.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Agent Cards Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                  {agents.map((ag) => (
+                    <div 
+                      key={ag.agent_id}
+                      className="p-5 rounded-xl border border-border bg-card shadow-soft hover:shadow-medium transition-all flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-bold text-lg">
+                              🤖
+                            </div>
+                            <div>
+                              <div className="font-bold text-foreground">{ag.agent_name}</div>
+                              <div className="text-xs text-muted-foreground font-mono">{ag.agent_id}</div>
+                            </div>
+                          </div>
+                          <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 text-xs">
+                            {ag.status || "active"}
+                          </Badge>
+                        </div>
+
+                        <div className="space-y-2 text-xs mb-4">
+                          <div>
+                            <span className="font-semibold text-muted-foreground">Department / Role: </span>
+                            <span className="text-foreground">{ag.role || "Customer Support"}</span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-muted-foreground">Voice Model: </span>
+                            <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">{ag.voice_model || "en-US-JennyNeural"}</code>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-muted-foreground">Allowed DB Tables: </span>
+                            <span className="text-foreground font-mono">{(ag.allowed_tables || ["orders"]).join(", ")}</span>
+                          </div>
+                          <div className="p-2.5 rounded-lg bg-muted/40 text-muted-foreground italic border border-border/40">
+                            "{ag.greeting}"
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-border flex justify-end">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-destructive hover:bg-destructive/10 text-xs h-8"
+                          onClick={() => handleDeleteAgent(ag.agent_id)}
+                          disabled={agents.length <= 1}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Create Agent Form */}
+                <div className="p-6 rounded-xl bg-muted/30 border border-border">
+                  <h3 className="text-base font-bold text-foreground mb-4 flex items-center">
+                    <Bot className="h-4 w-4 mr-2 text-primary" /> Create New AI Agent
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1 block">Agent Name</label>
+                      <Input
+                        placeholder="e.g. Maya - Inbound Sales"
+                        value={newAgent.agent_name}
+                        onChange={(e) => setNewAgent({ ...newAgent, agent_name: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1 block">Role / Purpose</label>
+                      <Input
+                        placeholder="e.g. Lead Qualification & Pricing"
+                        value={newAgent.role}
+                        onChange={(e) => setNewAgent({ ...newAgent, role: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1 block">Neural Voice Engine</label>
+                      <Input
+                        placeholder="en-US-JennyNeural, hi-IN-SwaraNeural, or ElevenLabs ID"
+                        value={newAgent.voice_model}
+                        onChange={(e) => setNewAgent({ ...newAgent, voice_model: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1 block">Opening Greeting Message</label>
+                      <Input
+                        placeholder="Hello! Welcome to our sales desk. How can I help you today?"
+                        value={newAgent.greeting}
+                        onChange={(e) => setNewAgent({ ...newAgent, greeting: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="mb-4">
+                    <label className="text-xs font-semibold text-foreground mb-1 block">Custom System Instructions & Tone</label>
+                    <textarea
+                      rows={3}
+                      className="w-full bg-background border border-border rounded-lg p-2.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      placeholder="You are an energetic sales representative. Recommend growth plans and guide visitors to schedule appointments..."
+                      value={newAgent.system_instructions}
+                      onChange={(e) => setNewAgent({ ...newAgent, system_instructions: e.target.value })}
+                    />
+                  </div>
+                  <Button 
+                    onClick={handleCreateAgent} 
+                    disabled={isCreatingAgent || !newAgent.agent_name.trim()}
+                    className="bg-primary text-white hover:bg-primary-hover shadow-soft"
+                  >
+                    {isCreatingAgent ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                    Deploy Agent to Workspace
+                  </Button>
+                </div>
+              </Card>
+            </TabsContent>
+
+            {/* Embed Widget Generator Tab */}
+            <TabsContent value="widget" className="space-y-6">
+              <Card className="p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b border-border">
+                  <div>
+                    <h2 className="text-xl font-semibold">Embeddable Web Chat & Voice Widget</h2>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Add autonomous AI voice & text customer support to any website (Shopify, WordPress, Webflow, React) with one line of HTML.
+                    </p>
+                  </div>
+                  <Button 
+                    onClick={copyWidgetScript}
+                    className="bg-primary text-white hover:bg-primary-hover shadow-soft"
+                  >
+                    {copiedScript ? <CheckCheck className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
+                    {copiedScript ? "Copied Snippet!" : "Copy Embed Code"}
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* Left: Customizer & Code Snippet */}
+                  <div className="space-y-5">
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1 block">Active Agent to Handle Widget Calls</label>
+                      <select 
+                        value={selectedAgentId}
+                        onChange={(e) => setSelectedAgentId(e.target.value)}
+                        className="w-full bg-background border border-border rounded-lg p-2.5 text-sm"
+                      >
+                        {agents.map(a => (
+                          <option key={a.agent_id} value={a.agent_id}>
+                            {a.agent_name} ({a.role || 'Support'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-foreground mb-1 block">Widget Title</label>
+                        <Input 
+                          value={widgetTitle}
+                          onChange={(e) => setWidgetTitle(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-foreground mb-1 block">Theme Hex Color</label>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="color" 
+                            value={widgetTheme}
+                            onChange={(e) => setWidgetTheme(e.target.value)}
+                            className="h-9 w-9 rounded border border-border cursor-pointer p-0.5 bg-background"
+                          />
+                          <Input 
+                            value={widgetTheme}
+                            onChange={(e) => setWidgetTheme(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Syntax Highlighted Snippet Box */}
+                    <div>
+                      <label className="text-xs font-semibold text-foreground mb-1.5 block">
+                        HTML Embed Code (Paste into your website right before <code className="text-primary font-mono">&lt;/body&gt;</code>):
+                      </label>
+                      <div className="relative bg-muted/80 rounded-xl p-4 font-mono text-xs border border-border text-foreground overflow-x-auto">
+                        <pre className="whitespace-pre-wrap leading-relaxed">
+{`<!-- VoxAide Autonomous Voice & Chat Widget -->
+<script 
+  src="${apiBaseUrl}/widget.js" 
+  data-company-id="${companyId}" 
+  data-agent-id="${selectedAgentId || 'agent_support_01'}"
+  data-theme="${widgetTheme}"
+  data-title="${widgetTitle}"
+  async>
+</script>`}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Simulated Preview */}
+                  <div className="p-6 rounded-2xl bg-muted/20 border border-border flex flex-col justify-between">
+                    <div className="mb-4">
+                      <div className="text-xs font-bold uppercase text-muted-foreground mb-1">Live Widget Simulator</div>
+                      <div className="text-sm text-foreground">How your widget looks to visitors on your website:</div>
+                    </div>
+
+                    <div className="bg-card rounded-xl border border-border shadow-soft p-5 max-w-sm mx-auto w-full">
+                      <div 
+                        className="rounded-t-lg p-3 text-white flex items-center justify-between"
+                        style={{ backgroundColor: widgetTheme }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-xs">🤖</div>
+                          <div className="font-semibold text-xs">{widgetTitle}</div>
+                        </div>
+                        <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded">Online</span>
+                      </div>
+                      <div className="bg-muted/30 p-3 h-32 text-xs text-muted-foreground flex items-center justify-center border-x border-border">
+                        "Hello! How can I help you today? You can speak or type your question."
+                      </div>
+                      <div className="p-2 border border-border rounded-b-lg bg-card flex gap-1">
+                        <input 
+                          disabled 
+                          placeholder="Type or speak a question..." 
+                          className="flex-1 bg-muted/40 rounded px-2 py-1 text-xs" 
+                        />
+                        <button 
+                          className="px-2 py-1 rounded text-white text-xs font-bold"
+                          style={{ backgroundColor: widgetTheme }}
+                        >
+                          ➤
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="text-center text-xs text-muted-foreground mt-4">
+                      Supports Speech-to-Text & Neural Voice playback automatically.
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </TabsContent>
 
             {/* 1. Knowledge Base Tab */}
             <TabsContent value="knowledge" className="space-y-6">

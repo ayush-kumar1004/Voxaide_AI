@@ -13,6 +13,7 @@ class CompanyService:
         self._companies_mem: Dict[str, Dict[str, Any]] = {}
         self._members_mem: Dict[str, Dict[str, Any]] = {}
         self._configs_mem: Dict[str, Dict[str, Any]] = {}
+        self._agents_mem: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._seed_defaults()
 
     def _seed_defaults(self):
@@ -39,16 +40,41 @@ class CompanyService:
             "user_id": demo_user,
             "role": "owner"
         }
-        self._configs_mem[demo_id] = AgentConfig(
+        
+        support_agent = AgentConfig(
             company_id=demo_id,
-            agent_name="VoxAide Assistant",
+            agent_id="agent_support_01",
+            agent_name="Sarah - Customer Support",
+            role="Order Tracking & Support",
+            voice_model="en-US-JennyNeural",
+            allowed_tables=["orders", "products"],
+            status="active",
             system_instructions=(
-                "You are the official AI customer support assistant for VoxAide Demo Enterprises. "
-                "Help callers with service information, business hours, and inquiries. "
+                "You are Sarah, the official AI customer support assistant for VoxAide Demo Enterprises. "
+                "Help callers with order status, tracking shipments, and resolving customer inquiries. "
                 "Always be courteous, professional, and accurate."
             ),
-            greeting="Thank you for contacting VoxAide Demo Enterprises. How can I assist you today?"
-        ).model_dump()
+            greeting="Hello! I'm Sarah from VoxAide Support. How can I help with your order today?"
+        )
+        sales_agent = AgentConfig(
+            company_id=demo_id,
+            agent_id="agent_sales_01",
+            agent_name="Alex - Inbound Sales",
+            role="Sales & Product Inquiries",
+            voice_model="en-US-GuyNeural",
+            allowed_tables=["products"],
+            status="active",
+            system_instructions=(
+                "You are Alex, an energetic inbound sales assistant for VoxAide Demo Enterprises. "
+                "Help callers choose the best voice AI subscription plans and schedule live product demonstrations."
+            ),
+            greeting="Welcome to VoxAide Sales! My name is Alex. How can I help grow your business today?"
+        )
+        self._agents_mem[demo_id] = {
+            support_agent.agent_id: support_agent.model_dump(),
+            sales_agent.agent_id: sales_agent.model_dump()
+        }
+        self._configs_mem[demo_id] = support_agent.model_dump()
 
     def _generate_slug(self, name: str) -> str:
         slug = re.sub(r'[^a-zA-Z0-9]+', '-', name.lower()).strip('-')
@@ -168,6 +194,68 @@ class CompanyService:
                 logger.error("Error adding member in Firestore", error=str(e))
 
         self._members_mem[f"{company_id}_{user_id}"] = member_data
+
+    def list_agents(self, company_id: str) -> List[AgentConfig]:
+        """Lists all agents configured for a specific company tenant."""
+        agents_dict = self._agents_mem.get(company_id, {})
+        if agents_dict:
+            return [AgentConfig(**data) for data in agents_dict.values()]
+        
+        # Check fallback single config
+        if company_id in self._configs_mem:
+            return [AgentConfig(**self._configs_mem[company_id])]
+        
+        # Return default starter agent
+        default_agent = self.get_agent_config(company_id)
+        return [default_agent]
+
+    def get_agent(self, company_id: str, agent_id: Optional[str] = None) -> AgentConfig:
+        """Retrieves a specific agent by ID, or the company's primary agent."""
+        agents_dict = self._agents_mem.get(company_id, {})
+        if agent_id and agent_id in agents_dict:
+            return AgentConfig(**agents_dict[agent_id])
+
+        if agents_dict:
+            first_key = next(iter(agents_dict))
+            return AgentConfig(**agents_dict[first_key])
+
+        return self.get_agent_config(company_id)
+
+    def create_agent(self, company_id: str, **agent_data) -> AgentConfig:
+        """Creates and registers a new agent for the company."""
+        if company_id not in self._agents_mem:
+            self._agents_mem[company_id] = {}
+
+        agent_id = agent_data.get("agent_id") or f"agent_{uuid.uuid4().hex[:8]}"
+        agent_data["agent_id"] = agent_id
+        agent_data["company_id"] = company_id
+
+        agent = AgentConfig(**agent_data)
+        self._agents_mem[company_id][agent_id] = agent.model_dump()
+        self._configs_mem[company_id] = agent.model_dump() # Sync primary
+        logger.info("Created new custom agent", company_id=company_id, agent_id=agent_id, name=agent.agent_name)
+        return agent
+
+    def update_agent(self, company_id: str, agent_id: str, **updates) -> Optional[AgentConfig]:
+        """Updates an existing agent's configuration."""
+        if company_id not in self._agents_mem or agent_id not in self._agents_mem[company_id]:
+            return None
+
+        current_data = self._agents_mem[company_id][agent_id]
+        current_data.update(updates)
+        current_data["updated_at"] = AgentConfig.model_fields["updated_at"].default_factory()
+
+        agent = AgentConfig(**current_data)
+        self._agents_mem[company_id][agent_id] = agent.model_dump()
+        return agent
+
+    def delete_agent(self, company_id: str, agent_id: str) -> bool:
+        """Deletes an agent."""
+        if company_id in self._agents_mem and agent_id in self._agents_mem[company_id]:
+            del self._agents_mem[company_id][agent_id]
+            logger.info("Deleted agent", company_id=company_id, agent_id=agent_id)
+            return True
+        return False
 
     def get_agent_config(self, company_id: str) -> AgentConfig:
         db = get_firestore_client()

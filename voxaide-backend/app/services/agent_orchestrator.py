@@ -17,6 +17,7 @@ from app.core.logging import logger
 class AgentRequest:
     company_id: str
     message: str
+    agent_id: Optional[str] = None
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
     channel: str = "web_text"  # web_text, web_voice, phone
@@ -85,8 +86,8 @@ class AgentOrchestrator:
                 latency_ms=round((time.time() - start_time) * 1000, 2)
             )
 
-        # 2. Load dynamic company agent configuration
-        agent_config = self.company_svc.get_agent_config(request.company_id)
+        # 2. Load dynamic company agent configuration (dispatches to specific agent if specified)
+        agent_config = self.company_svc.get_agent(request.company_id, agent_id=request.agent_id)
 
         # 3. Resolve or initialize conversation session
         conversation = self.conversation_svc.get_or_create_conversation(

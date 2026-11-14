@@ -40,6 +40,15 @@ def create_app():
         except Exception as e:
             return jsonify({"error": f"Audio file not found: {str(e)}"}), 404
 
+    @app.route('/widget.js', methods=['GET'])
+    @cross_origin()
+    def serve_widget_script():
+        static_dir = os.path.join(os.path.dirname(__file__), "static")
+        response = send_from_directory(static_dir, "widget.js", mimetype="application/javascript")
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Cache-Control"] = "public, max-age=3600"
+        return response
+
     # Firebase Admin SDK Initialization
     db = None
     firebase_key_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")

@@ -5,7 +5,12 @@ from datetime import datetime, timezone
 class AgentConfig(BaseModel):
     """Configuration for a company's customer-support AI agent."""
     company_id: str
+    agent_id: str = "default_agent"
     agent_name: str = "Support Assistant"
+    role: str = "General Support"
+    voice_model: str = "en-US-JennyNeural"
+    allowed_tables: List[str] = Field(default_factory=lambda: ["orders", "products"])
+    status: str = "active"  # active, draft, paused
     system_instructions: str = (
         "You are a helpful, professional, and knowledgeable AI customer-support assistant. "
         "Answer caller inquiries using only verified company information. If information is unavailable, "
