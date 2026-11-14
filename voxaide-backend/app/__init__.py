@@ -16,36 +16,27 @@ load_dotenv()
 def create_app():
     app = Flask(__name__)
 
-    # Enable CORS globally for all frontend origins
-    CORS(app, resources={r"/*": {"origins": [
-        "http://localhost:5173",
-        "http://localhost:8080",
-        "https://voxaide.web.app",
-        "https://voxaide-main.vercel.app"
-    ]}})
+    # Enable CORS globally for all frontend origins and embeddable widget consumers
+    CORS(app, resources={r"/*": {"origins": "*"}})
 
     @app.route('/health', methods=['GET'])
     def health():
         return jsonify({"status": "healthy", "version": "2.1.0-agent-orchestrator"}), 200
 
     @app.route('/static/audio/<path:filename>', methods=['GET'])
-    @cross_origin()
     def serve_static_audio(filename):
         from app.services.audio_service import audio_service
         try:
             response = send_from_directory(audio_service.static_audio_dir, filename)
-            response.headers["Access-Control-Allow-Origin"] = "*"
             response.headers["Cache-Control"] = "public, max-age=86400"
             return response
         except Exception as e:
             return jsonify({"error": f"Audio file not found: {str(e)}"}), 404
 
     @app.route('/widget.js', methods=['GET'])
-    @cross_origin()
     def serve_widget_script():
         static_dir = os.path.join(os.path.dirname(__file__), "static")
         response = send_from_directory(static_dir, "widget.js", mimetype="application/javascript")
-        response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Cache-Control"] = "public, max-age=3600"
         return response
 

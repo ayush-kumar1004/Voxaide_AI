@@ -160,7 +160,18 @@ class CompanyService:
 
         if company_id in self._companies_mem:
             return Company(**self._companies_mem[company_id])
-        return None
+        
+        # Auto-provision on-demand sandbox company for any new tenant ID
+        auto_comp = Company(
+            id=company_id,
+            name=f"{company_id.replace('_', ' ').replace('-', ' ').title()} Support",
+            slug=company_id.replace('_', '-'),
+            description=f"AI Voice and Customer Support for {company_id}.",
+            industry="Technology",
+            status="active"
+        )
+        self._companies_mem[company_id] = auto_comp.model_dump()
+        return auto_comp
 
     def verify_user_access(self, user_id: str, company_id: str) -> bool:
         """Enforces tenant isolation by checking if user_id is a verified member of company_id."""

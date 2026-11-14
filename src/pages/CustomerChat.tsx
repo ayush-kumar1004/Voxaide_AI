@@ -235,7 +235,6 @@ const CustomerChat = () => {
       try {
         setIsPlaying(true);
         const audio = new Audio(audioUrl);
-        audio.crossOrigin = 'anonymous';
         audio.onended = () => setIsPlaying(false);
         audio.onerror = () => {
           setIsPlaying(false);
