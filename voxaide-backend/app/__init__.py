@@ -82,11 +82,15 @@ def create_app():
     from app.api.knowledge_routes import knowledge_bp
     from app.api.appointment_routes import appointment_bp
     from app.api.telephony_routes import telephony_bp
+    from app.api.billing_routes import billing_bp
+    from app.api.connector_routes import connector_bp
     app.register_blueprint(company_bp)
     app.register_blueprint(agent_bp)
     app.register_blueprint(knowledge_bp)
     app.register_blueprint(appointment_bp)
     app.register_blueprint(telephony_bp)
+    app.register_blueprint(billing_bp)
+    app.register_blueprint(connector_bp)
 
 
     # -------------------- DATABASE TOOLS FOR GEMINI (LEGACY DEMO) --------------------

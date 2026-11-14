@@ -59,7 +59,7 @@ const About = () => {
               Revolutionizing Customer Support with <span className="gradient-text">Conversational AI</span>
             </h1>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              Founded in 2024, Voxaide emerged from a simple yet powerful vision: to make customer support more intelligent, efficient, and human-centered through the power of AI.
+              VoxAide empowers modern businesses with autonomous, voice-first AI agents that resolve customer calls, query internal databases, and deliver human-grade support 24/7.
             </p>
           </div>
         </section>
@@ -169,10 +169,10 @@ const About = () => {
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
               {[
-                { name: "Google Vertex AI", description: "Advanced language models" },
-                { name: "Cloud Speech APIs", description: "Real-time voice processing" },
-                { name: "React & Flask", description: "Modern web architecture" },
-                { name: "Enterprise Security", description: "SOC 2 compliance" }
+                { name: "Agentic AI Orchestrator", description: "Multi-tenant reasoning & tool calls" },
+                { name: "PostgreSQL & CRM Connectors", description: "Real-time safe database lookups" },
+                { name: "Zero-Cost Neural Audio", description: "Edge-TTS & Web Speech synthesis" },
+                { name: "Twilio Media Streams", description: "Sub-300ms phone call handling" }
               ].map((tech, index) => (
                 <Card key={index} className="p-6 text-center shadow-soft border border-border">
                   <h3 className="font-semibold mb-2">{tech.name}</h3>

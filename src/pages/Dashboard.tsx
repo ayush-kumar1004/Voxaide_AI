@@ -26,7 +26,11 @@ import {
   Sparkles,
   Clock,
   ShieldAlert,
-  PhoneIncoming
+  PhoneIncoming,
+  Database,
+  Link2,
+  ShieldCheck,
+  Check
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -238,12 +242,135 @@ const Dashboard = () => {
     }
   };
 
+  // Database Connector State
+  const [dbConfig, setDbConfig] = useState({
+    host: "localhost",
+    port: "5432",
+    dbname: "ecommerce_db",
+    user: "postgres",
+    password: "",
+    sslmode: "prefer",
+    allowed_tables: ["orders", "products", "customers"]
+  });
+  const [dbStatus, setDbStatus] = useState<{ connected: boolean; message?: string; tables?: string[] }>({
+    connected: false
+  });
+  const [isTestingDb, setIsTestingDb] = useState(false);
+  const [isSavingDb, setIsSavingDb] = useState(false);
+
+  const loadDbConnector = async (targetCompany = companyId) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/companies/${targetCompany}/connectors/postgres`, {
+        headers: getHeaders(targetCompany)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.connected && data.connector) {
+          setDbStatus({
+            connected: true,
+            tables: data.connector.allowed_tables || []
+          });
+          setDbConfig(prev => ({
+            ...prev,
+            host: data.connector.host || prev.host,
+            port: String(data.connector.port || prev.port),
+            dbname: data.connector.dbname || prev.dbname,
+            user: data.connector.user || prev.user,
+            allowed_tables: data.connector.allowed_tables || prev.allowed_tables
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn("Could not load database connector", err);
+    }
+  };
+
+  const handleTestDb = async () => {
+    setIsTestingDb(true);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/companies/${companyId}/connectors/postgres/test`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getHeaders(companyId)
+        },
+        body: JSON.stringify(dbConfig)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDbStatus({
+          connected: true,
+          message: data.message,
+          tables: data.tables || []
+        });
+        toast({
+          title: "Connection Successful",
+          description: data.message || "Connected to PostgreSQL database!"
+        });
+      } else {
+        toast({
+          title: "Connection Failed",
+          description: data.error || "Could not connect to PostgreSQL.",
+          variant: "destructive"
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "Connection Error",
+        description: "Network error testing database.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsTestingDb(false);
+    }
+  };
+
+  const handleSaveDb = async () => {
+    setIsSavingDb(true);
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/companies/${companyId}/connectors/postgres`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getHeaders(companyId)
+        },
+        body: JSON.stringify(dbConfig)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDbStatus({
+          connected: true,
+          tables: data.connector?.allowed_tables || dbConfig.allowed_tables
+        });
+        toast({
+          title: "Connector Saved",
+          description: "PostgreSQL database is now active and ready for AI agent queries."
+        });
+      } else {
+        toast({
+          title: "Save Failed",
+          description: data.error || "Could not save database connector.",
+          variant: "destructive"
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "Save Error",
+        description: "Failed to save database configuration.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSavingDb(false);
+    }
+  };
+
   const refreshAll = (targetCompany = companyId) => {
     loadDocuments(targetCompany);
     loadAppointments(targetCompany);
     loadConversations(targetCompany);
     loadAnalytics(targetCompany);
     loadTelephony(targetCompany);
+    loadDbConnector(targetCompany);
   };
 
   useEffect(() => {
@@ -534,8 +661,11 @@ const Dashboard = () => {
 
           {/* Navigation Tabs */}
           <Tabs defaultValue="knowledge" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-2 md:grid-cols-6 h-auto p-1">
+            <TabsList className="grid w-full grid-cols-2 md:grid-cols-7 h-auto p-1">
               <TabsTrigger value="knowledge">Knowledge Base</TabsTrigger>
+              <TabsTrigger value="connectors">
+                <Database className="h-3.5 w-3.5 mr-1" /> Database
+              </TabsTrigger>
               <TabsTrigger value="appointments">Appointments</TabsTrigger>
               <TabsTrigger value="conversations">Conversations</TabsTrigger>
               <TabsTrigger value="analytics">Analytics</TabsTrigger>
@@ -622,6 +752,180 @@ const Dashboard = () => {
                         </div>
                       </div>
                     ))
+                  )}
+                </div>
+              </Card>
+            </TabsContent>
+
+            {/* Database Connectors Tab */}
+            <TabsContent value="connectors" className="space-y-6">
+              <Card className="p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b border-border">
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <h2 className="text-xl font-semibold">PostgreSQL Database Connector</h2>
+                      <Badge 
+                        variant={dbStatus.connected ? "secondary" : "outline"} 
+                        className={dbStatus.connected ? "bg-emerald-100 text-emerald-700" : "text-muted-foreground"}
+                      >
+                        {dbStatus.connected ? "Active & Connected" : "Not Connected"}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Allow your AI agents to answer customer inquiries by querying your PostgreSQL / Supabase database in real time.
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={handleTestDb} 
+                      disabled={isTestingDb}
+                    >
+                      {isTestingDb ? (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                          Testing...
+                        </>
+                      ) : (
+                        <>
+                          <Link2 className="mr-2 h-4 w-4" />
+                          Test Connection
+                        </>
+                      )}
+                    </Button>
+                    <Button 
+                      className="bg-primary text-white hover:bg-primary-hover shadow-soft" 
+                      onClick={handleSaveDb} 
+                      disabled={isSavingDb}
+                    >
+                      {isSavingDb ? (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="mr-2 h-4 w-4" />
+                          Save Connector
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Security Banner */}
+                <div className="mb-6 p-4 rounded-xl bg-accent/5 border border-accent/20 flex items-start space-x-3 text-xs sm:text-sm text-muted-foreground">
+                  <ShieldCheck className="h-5 w-5 text-accent mt-0.5 shrink-0" />
+                  <div>
+                    <span className="font-semibold text-foreground">Zero-Modification Security Guarantee: </span>
+                    All agent database queries are strictly executed in <code className="bg-muted px-1.5 py-0.5 rounded text-foreground font-mono">READ ONLY</code> transactions with a 3-second statement timeout. The AI cannot modify, insert, or delete any customer data.
+                  </div>
+                </div>
+
+                {/* Connection Form Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1 block">Database Host</label>
+                    <Input
+                      placeholder="e.g. db.supabase.co or localhost"
+                      value={dbConfig.host}
+                      onChange={(e) => setDbConfig({ ...dbConfig, host: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1 block">Port</label>
+                    <Input
+                      placeholder="5432"
+                      value={dbConfig.port}
+                      onChange={(e) => setDbConfig({ ...dbConfig, port: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1 block">Database Name</label>
+                    <Input
+                      placeholder="e.g. ecommerce_db or postgres"
+                      value={dbConfig.dbname}
+                      onChange={(e) => setDbConfig({ ...dbConfig, dbname: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1 block">Database User</label>
+                    <Input
+                      placeholder="postgres"
+                      value={dbConfig.user}
+                      onChange={(e) => setDbConfig({ ...dbConfig, user: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1 block">Database Password</label>
+                    <Input
+                      type="password"
+                      placeholder="••••••••••••"
+                      value={dbConfig.password}
+                      onChange={(e) => setDbConfig({ ...dbConfig, password: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground mb-1 block">SSL Mode</label>
+                    <Input
+                      placeholder="prefer or require"
+                      value={dbConfig.sslmode}
+                      onChange={(e) => setDbConfig({ ...dbConfig, sslmode: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                {/* Allowed Tables Selection */}
+                <div className="pt-4 border-t border-border">
+                  <div className="mb-2">
+                    <label className="text-xs font-semibold text-foreground block">
+                      Allowed Tables for AI Agent Search (comma-separated):
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      The AI agent will only be granted permission to query tables listed here.
+                    </p>
+                  </div>
+                  <Input
+                    placeholder="orders, products, customers"
+                    value={dbConfig.allowed_tables.join(", ")}
+                    onChange={(e) => setDbConfig({
+                      ...dbConfig,
+                      allowed_tables: e.target.value.split(",").map(t => t.trim()).filter(Boolean)
+                    })}
+                    className="mb-3"
+                  />
+
+                  {/* Discovered Tables Badges */}
+                  {dbStatus.tables && dbStatus.tables.length > 0 && (
+                    <div>
+                      <span className="text-xs text-muted-foreground block mb-1.5">
+                        Discovered tables in database (click to toggle):
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {dbStatus.tables.map((t) => {
+                          const isSelected = dbConfig.allowed_tables.includes(t);
+                          return (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => {
+                                const newTables = isSelected 
+                                  ? dbConfig.allowed_tables.filter(tab => tab !== t)
+                                  : [...dbConfig.allowed_tables, t];
+                                setDbConfig({ ...dbConfig, allowed_tables: newTables });
+                              }}
+                              className={`text-xs px-2.5 py-1 rounded-md border font-mono transition-all ${
+                                isSelected
+                                  ? "bg-primary text-white border-primary"
+                                  : "bg-muted text-muted-foreground border-border hover:text-foreground"
+                              }`}
+                            >
+                              {isSelected ? `✓ ${t}` : `+ ${t}`}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   )}
                 </div>
               </Card>

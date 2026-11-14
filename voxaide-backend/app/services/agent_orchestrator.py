@@ -9,6 +9,7 @@ from app.services.knowledge_service import knowledge_service, KnowledgeService
 from app.tools.base import tool_registry, ToolRegistry
 import app.tools.appointment_tools  # noqa: F401 - registers appointment tools
 import app.tools.escalation_tool   # noqa: F401 - registers escalation tool
+import app.tools.database_tools     # noqa: F401 - registers database tools
 from app.prompts.system_prompts import build_system_prompt
 from app.core.logging import logger
 

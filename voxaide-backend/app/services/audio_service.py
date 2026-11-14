@@ -27,11 +27,11 @@ class AudioService:
         clean_filename = filename or f"speech_{uuid.uuid4().hex[:12]}.mp3"
         filepath = os.path.join(self.static_audio_dir, clean_filename)
 
-        # 1. Try ElevenLabs if configured
+        # 1. Try ElevenLabs if explicitly configured and key present
         elevenlabs_key = os.environ.get("ELEVENLABS_API_KEY")
-        voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+        voice_id = os.environ.get("ELEVENLABS_VOICE_ID")
 
-        if elevenlabs_key:
+        if elevenlabs_key and voice_id:
             try:
                 url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
                 headers = {
@@ -52,7 +52,28 @@ class AudioService:
             except Exception as e:
                 logger.warning("ElevenLabs synthesis failed, trying fallback", error=str(e))
 
-        # 2. Fallback to gTTS
+        # 2. High-quality zero-cost Microsoft Edge Neural TTS
+        try:
+            import asyncio
+            import edge_tts
+
+            edge_voice = os.environ.get("EDGE_TTS_VOICE", "en-US-JennyNeural")
+            if lang_code.startswith("hi"):
+                edge_voice = "hi-IN-SwaraNeural"
+            elif lang_code.startswith("in"):
+                edge_voice = "en-IN-NeerjaNeural"
+
+            async def run_edge_tts():
+                communicate = edge_tts.Communicate(text, edge_voice)
+                await communicate.save(filepath)
+
+            asyncio.run(run_edge_tts())
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                return filepath
+        except Exception as edge_err:
+            logger.warning("Edge-TTS synthesis unavailable or failed, falling back to gTTS", error=str(edge_err))
+
+        # 3. Secondary fallback to gTTS
         try:
             from gtts import gTTS
             tts = gTTS(text=text, lang=lang_code)

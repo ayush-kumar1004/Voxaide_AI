@@ -54,7 +54,7 @@ const CustomerChat = () => {
         try {
           const ud = JSON.parse(userDataStr);
           if (ud.company) companyId = ud.company.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-        } catch (e) {}
+        } catch (e) { }
       }
 
       const response = await fetch(`${apiBaseUrl}/api/agent/companies/${companyId}/agent/chat`, {
@@ -81,9 +81,7 @@ const CustomerChat = () => {
           audioUrl: result.audio_url
         };
         setMessages(prev => [...prev, botMessage]);
-        if (result.audio_url) {
-          playAudio(result.audio_url);
-        }
+        playAudio(result.audio_url, botMessage.content);
       } else {
         throw new Error("Failed to get response from server");
       }
@@ -143,7 +141,7 @@ const CustomerChat = () => {
 
   const sendAudioToServer = async (audioBlob: Blob) => {
     setIsLoading(true);
-    
+
     // Add user message placeholder
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -179,10 +177,10 @@ const CustomerChat = () => {
 
       if (response.ok) {
         const result = await response.json();
-        
+
         // Update user message with transcription
-        setMessages(prev => prev.map(msg => 
-          msg.id === userMessage.id 
+        setMessages(prev => prev.map(msg =>
+          msg.id === userMessage.id
             ? { ...msg, content: result.user_message || 'Voice message' }
             : msg
         ));
@@ -197,10 +195,8 @@ const CustomerChat = () => {
         };
         setMessages(prev => [...prev, botMessage]);
 
-        // Auto-play response if audio is available
-        if (result.audio_url) {
-          playAudio(result.audio_url);
-        }
+        // Auto-play response with audio stream or speech synthesis fallback
+        playAudio(result.audio_url, botMessage.content);
       } else {
         throw new Error('Failed to get response from server');
       }
@@ -211,7 +207,7 @@ const CustomerChat = () => {
         description: "Could not connect to Voxaide server. Please try again.",
         variant: "destructive"
       });
-      
+
       // Remove the placeholder user message on error
       setMessages(prev => prev.filter(msg => msg.id !== userMessage.id));
     } finally {
@@ -219,26 +215,44 @@ const CustomerChat = () => {
     }
   };
 
-  const playAudio = async (audioUrl: string) => {
-    if (!audioUrl) return;
+  const speakWithBrowser = (text: string) => {
+    if (!("speechSynthesis" in window)) return;
     try {
-      setIsPlaying(true);
-      const audio = new Audio(audioUrl);
-      audio.crossOrigin = 'anonymous';
-      audio.onended = () => setIsPlaying(false);
-      audio.onerror = (e) => {
-        setIsPlaying(false);
-        console.warn('Audio playback error for URL:', audioUrl, e);
-        toast({
-          title: "Audio Unavailable",
-          description: "Could not stream audio. Click 'Play Audio' to retry.",
-          variant: "default"
-        });
-      };
-      await audio.play();
-    } catch (error) {
-      console.warn('Autoplay prevented or playback interrupted:', error);
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.05;
+      utterance.onstart = () => setIsPlaying(true);
+      utterance.onend = () => setIsPlaying(false);
+      utterance.onerror = () => setIsPlaying(false);
+      window.speechSynthesis.speak(utterance);
+    } catch {
       setIsPlaying(false);
+    }
+  };
+
+  const playAudio = async (audioUrl?: string, fallbackText?: string) => {
+    if (audioUrl) {
+      try {
+        setIsPlaying(true);
+        const audio = new Audio(audioUrl);
+        audio.crossOrigin = 'anonymous';
+        audio.onended = () => setIsPlaying(false);
+        audio.onerror = () => {
+          setIsPlaying(false);
+          if (fallbackText) speakWithBrowser(fallbackText);
+        };
+        await audio.play();
+        return;
+      } catch (error) {
+        console.warn('Autoplay prevented or network error, falling back to Web Speech:', error);
+        setIsPlaying(false);
+        if (fallbackText) speakWithBrowser(fallbackText);
+        return;
+      }
+    }
+
+    if (fallbackText) {
+      speakWithBrowser(fallbackText);
     }
   };
 
@@ -271,7 +285,7 @@ const CustomerChat = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
-      
+
       <div className="pt-16 pb-8">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Header */}
@@ -291,32 +305,28 @@ const CustomerChat = () => {
               {messages.map((message) => (
                 <div
                   key={message.id}
-                  className={`flex items-start space-x-3 ${
-                    message.type === 'user' ? 'flex-row-reverse space-x-reverse' : ''
-                  }`}
+                  className={`flex items-start space-x-3 ${message.type === 'user' ? 'flex-row-reverse space-x-reverse' : ''
+                    }`}
                 >
-                  <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                    message.type === 'user' ? 'bg-primary' : 'bg-accent'
-                  }`}>
+                  <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${message.type === 'user' ? 'bg-primary' : 'bg-accent'
+                    }`}>
                     {message.type === 'user' ? (
                       <User className="h-4 w-4 text-white" />
                     ) : (
                       <Bot className="h-4 w-4 text-white" />
                     )}
                   </div>
-                  <div className={`flex-1 max-w-xs sm:max-w-md ${
-                    message.type === 'user' ? 'text-right' : ''
-                  }`}>
-                    <div className={`inline-block px-4 py-2 rounded-2xl ${
-                      message.type === 'user'
+                  <div className={`flex-1 max-w-xs sm:max-w-md ${message.type === 'user' ? 'text-right' : ''
+                    }`}>
+                    <div className={`inline-block px-4 py-2 rounded-2xl ${message.type === 'user'
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-muted text-muted-foreground'
-                    }`}>
+                      }`}>
                       <p className="text-sm">{message.content}</p>
                     </div>
-                    {message.audioUrl && message.type === 'bot' && (
+                    {message.type === 'bot' && (
                       <button
-                        onClick={() => playAudio(message.audioUrl!)}
+                        onClick={() => playAudio(message.audioUrl, message.content)}
                         className="mt-2 text-xs text-primary hover:text-primary-hover flex items-center space-x-1"
                       >
                         {isPlaying ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
@@ -337,8 +347,8 @@ const CustomerChat = () => {
                   <div className="bg-muted rounded-2xl px-4 py-2">
                     <div className="flex space-x-1">
                       <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
                   </div>
                 </div>
@@ -359,8 +369,8 @@ const CustomerChat = () => {
                   disabled={isLoading}
                   className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
-                <Button 
-                  onClick={handleSendTextMessage} 
+                <Button
+                  onClick={handleSendTextMessage}
                   disabled={isLoading || !textInput.trim()}
                   variant="hero"
                   size="sm"
@@ -381,7 +391,7 @@ const CustomerChat = () => {
                 >
                   <RotateCcw className="h-4 w-4" />
                 </Button>
-                
+
                 <Button
                   variant={isRecording ? "destructive" : "outline"}
                   size="lg"
