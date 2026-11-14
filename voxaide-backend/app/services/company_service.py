@@ -168,9 +168,15 @@ class CompanyService:
             slug=company_id.replace('_', '-'),
             description=f"AI Voice and Customer Support for {company_id}.",
             industry="Technology",
+            owner_user_id=f"user_{company_id}",
             status="active"
         )
         self._companies_mem[company_id] = auto_comp.model_dump()
+        self._members_mem[f"{company_id}_user_{company_id}"] = {
+            "company_id": company_id,
+            "user_id": f"user_{company_id}",
+            "role": "owner"
+        }
         return auto_comp
 
     def verify_user_access(self, user_id: str, company_id: str) -> bool:
