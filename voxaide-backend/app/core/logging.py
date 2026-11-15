@@ -46,6 +46,9 @@ class StructuredLogger:
     def info(self, message: str, **context):
         self.log("info", message, **context)
 
+    def debug(self, message: str, **context):
+        self.log("debug", message, **context)
+
     def warning(self, message: str, **context):
         self.log("warning", message, **context)
 

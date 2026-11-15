@@ -69,7 +69,7 @@ class GeminiEmbeddingProvider(EmbeddingProvider):
                     self.model_name = m
                     return emb
             except Exception as e:
-                logger.debug(f"Embedding model '{m}' failed, trying next", error=str(e)[:100])
+                logger.info(f"Embedding model '{m}' failed, trying next", error=str(e)[:100])
                 continue
 
         logger.warning("All Gemini embedding models failed, using deterministic fallback")
@@ -93,7 +93,7 @@ class GeminiEmbeddingProvider(EmbeddingProvider):
                     self.model_name = m
                     return emb
             except Exception as e:
-                logger.debug(f"Batch embedding model '{m}' failed, trying next", error=str(e)[:100])
+                logger.info(f"Batch embedding model '{m}' failed, trying next", error=str(e)[:100])
                 continue
 
         logger.warning("All Batch Gemini embedding models failed, using deterministic fallback")
