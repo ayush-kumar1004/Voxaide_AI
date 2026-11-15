@@ -5,20 +5,21 @@ from app.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from app.core.logging import logger
 
 FALLBACK_MODELS = [
-    "gemini-1.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-pro",
+    "models/gemini-2.5-flash",
+    "models/gemini-3.5-flash",
+    "models/gemini-flash-latest",
+    "models/gemini-pro-latest",
     "gemini-2.5-flash",
+    "gemini-3.5-flash"
 ]
 
 class GeminiProvider(LLMProvider):
     """
     Google Gemini implementation of LLMProvider with automatic rate-limit cascade.
-    Defaults to gemini-1.5-flash for generous Free-Tier quotas (1500 req/day).
+    Defaults to models/gemini-2.5-flash with fallback to models/gemini-3.5-flash.
     """
 
-    def __init__(self, model_name: str = "gemini-1.5-flash", api_key: Optional[str] = None):
+    def __init__(self, model_name: str = "models/gemini-2.5-flash", api_key: Optional[str] = None):
         self.model_name = model_name
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         if self.api_key:

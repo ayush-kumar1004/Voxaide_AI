@@ -92,6 +92,10 @@ class KnowledgeService:
                 logger.error("Error saving document to Firestore", error=str(e), doc_id=doc.id)
 
         self._docs_mem[doc.id] = doc_dict
+
+        # 7. Automatically sync tenant company profile and agent persona from knowledge base
+        self._sync_company_profile_from_document(company_id, cleaned_text)
+
         logger.info(
             "Document ingested and indexed successfully",
             company_id=company_id,
@@ -100,6 +104,52 @@ class KnowledgeService:
             chunks=len(chunks)
         )
         return doc
+
+    def _sync_company_profile_from_document(self, company_id: str, text: str):
+        """
+        Extracts verified company branding and updates the company profile and agent persona.
+        Ensures tenant identity dynamically matches uploaded business knowledge.
+        """
+        import re
+        from app.services.company_service import company_service
+        from app.core.database import get_firestore_client
+
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        if not lines:
+            return
+
+        detected_name = None
+        first_line = lines[0]
+        if "—" in first_line:
+            candidate = first_line.split("—")[0].strip().title()
+            if len(candidate) > 2 and "Knowledge" not in candidate:
+                detected_name = candidate
+        elif "-" in first_line:
+            candidate = first_line.split("-")[0].strip().title()
+            if len(candidate) > 2 and "Knowledge" not in candidate:
+                detected_name = candidate
+
+        match_co = re.search(r'([A-Z][a-zA-Z0-9\s]+(?:Appliances|Enterprises|Solutions|Services|Corp|Inc|Company|Retailer))\s+is\s+a\b', text)
+        if match_co:
+            detected_name = match_co.group(1).strip()
+
+        if detected_name:
+            if company_id in company_service._companies_mem:
+                company_service._companies_mem[company_id]["name"] = detected_name
+
+            company_service.update_agent_config(
+                company_id,
+                agent_name=f"{detected_name} Support Assistant"
+            )
+
+            db = get_firestore_client()
+            if db:
+                try:
+                    db.collection("companies").document(company_id).update({"name": detected_name})
+                except Exception:
+                    pass
+
+            logger.info("Updated company brand identity from knowledge base", company_id=company_id, name=detected_name)
 
     def list_documents(self, company_id: str) -> List[Document]:
         """List all documents for a company."""

@@ -162,7 +162,7 @@ class AgentOrchestrator:
         retrieved_knowledge = self.knowledge_svc.search(
             company_id=request.company_id,
             query=request.message,
-            top_k=4
+            top_k=6
         )
 
         sources = [
@@ -174,7 +174,6 @@ class AgentOrchestrator:
             }
             for chunk in retrieved_knowledge
         ]
-
 
         # 7. Construct dynamic system prompt with Prompt Injection Defense
         system_prompt = build_system_prompt(
@@ -189,13 +188,21 @@ class AgentOrchestrator:
         # 9. Invoke LLM Provider
         executed_tools = []
         should_escalate = False
+
+        # Safety hazard detection (smoke, sparks, fire, shock, gas leak)
+        is_safety_emergency = any(k in request.message.lower() for k in [
+            "spark", "sparking", "smoke", "burning", "burnt", "fire", "shock", "electric shock", "gas leak"
+        ])
+        if is_safety_emergency:
+            should_escalate = True
+
         try:
             llm_response = self.llm.generate(
                 prompt=request.message,
                 system_instruction=system_prompt,
                 tools=tool_schemas if tool_schemas else None,
                 history=history,
-                temperature=0.3
+                temperature=0.2
             )
             reply_text = llm_response.content
 
@@ -232,8 +239,13 @@ class AgentOrchestrator:
                         if not reply_text and tool_msg:
                             reply_text = tool_msg
 
+            # Strict Safety Enforcement:
+            if is_safety_emergency and not any(t.get("name") == "escalate_to_human" for t in executed_tools):
+                tool_res = self.tools.execute("escalate_to_human", company_id=request.company_id, arguments={"reason": "Safety hazard reported by customer"})
+                executed_tools.append({"name": "escalate_to_human", "arguments": {"reason": "Safety hazard reported by customer"}, "result": tool_res})
+                should_escalate = True
+
             # Strict Anti-Fabrication Check for Booking:
-            # If the model claims an appointment was booked, but no booking tool succeeded, correct it
             booking_claim_keywords = ["has been booked", "successfully booked", "have booked your appointment", "confirmed your appointment", "appointment is booked"]
             claims_booking = any(kw in reply_text.lower() for kw in booking_claim_keywords)
             has_successful_booking = any(
@@ -253,48 +265,36 @@ class AgentOrchestrator:
         except Exception as e:
             logger.error("LLM generation failed in orchestrator", error=str(e), company_id=request.company_id)
 
-            clean_query = request.message.lower().strip()
-            is_company_identity = any(k in clean_query for k in [
-                "company name", "which company", "what company", "who are you", "who am i speaking", "what is your name"
-            ])
-            is_greeting = any(clean_query.startswith(g) or clean_query == g for g in [
-                "hello", "hi", "hey", "good morning", "good afternoon", "good evening", "howdy", "greetings"
-            ])
-            is_hours_query = any(k in clean_query for k in [
-                "business hours", "what are your hours", "hours of operation", "when are you open", "timing", "schedule"
-            ])
+            if is_safety_emergency:
+                reply_text = (
+                    "Please stop using the appliance immediately and unplug it from the electrical socket if safe to do so. "
+                    "Do not open electrical panels or attempt self-repair. "
+                    "I am urgently escalating this safety hazard to our human technical support team."
+                )
+                should_escalate = True
+                tool_res = self.tools.execute("escalate_to_human", company_id=request.company_id, arguments={"reason": "Urgent safety hazard reported"})
+                executed_tools.append({"name": "escalate_to_human", "arguments": {"reason": "Urgent safety hazard reported"}, "result": tool_res})
 
-            if is_company_identity:
-                reply_text = (
-                    f"You have reached {company.name}. I am {agent_config.agent_name}, "
-                    f"your AI customer support assistant. How can I assist you today?"
-                )
-                should_escalate = False
-            elif is_hours_query and company.business_hours:
-                hours_desc = ", ".join(f"{d.replace('_', ' ').capitalize()}: {h}" for d, h in company.business_hours.items())
-                reply_text = f"{company.name}'s business hours are: {hours_desc}."
-                should_escalate = False
-            elif is_greeting and not retrieved_knowledge:
-                reply_text = (
-                    f"Hello! Welcome to {company.name}. I am {agent_config.agent_name}. "
-                    f"How can I assist you with our services, products, or questions today?"
-                )
-                should_escalate = False
             elif retrieved_knowledge:
                 extracted_snippet = self._extract_relevant_snippet(request.message, retrieved_knowledge)
-                top_doc = retrieved_knowledge[0].get("document_name") or retrieved_knowledge[0].get("source") or "Knowledge Base"
+                top_doc = retrieved_knowledge[0].get("document_name") or ""
+                source_prefix = f"Based on {top_doc}:\n\n" if top_doc else ""
                 reply_text = (
-                    f"Based on {company.name}'s knowledge base ({top_doc}):\n\n"
-                    f"{extracted_snippet}\n\n"
+                    f"{source_prefix}{extracted_snippet}\n\n"
                     f"Please let me know if you would like more details or if you would like to speak with our support team."
                 )
                 should_escalate = False
             else:
-                reply_text = agent_config.escalation_message or (
-                    "I apologize, but I am having trouble processing your request right now. "
-                    "Let me connect you with a team member."
-                )
-                should_escalate = True
+                clean_query = request.message.lower().strip()
+                is_company_identity = any(k in clean_query for k in [
+                    "company name", "which company", "what company", "who are you", "who am i speaking", "what is your name"
+                ])
+                if is_company_identity:
+                    reply_text = f"You have reached {company.name}. I am {agent_config.agent_name}, your AI customer support assistant. How can I assist you today?"
+                    should_escalate = False
+                else:
+                    reply_text = "I don't have confirmed information about this in my current knowledge base. Let me connect you with our support team."
+                    should_escalate = True
 
         # 11. Record assistant response to memory
         self.conversation_svc.add_message(

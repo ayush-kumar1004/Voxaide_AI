@@ -8,19 +8,22 @@ from app.providers.base import EmbeddingProvider
 from app.core.logging import logger
 
 CANDIDATE_EMBEDDING_MODELS = [
+    "models/gemini-embedding-001",
+    "gemini-embedding-001",
+    "models/gemini-embedding-2-preview",
+    "gemini-embedding-2-preview",
+    "models/gemini-embedding-2",
     "text-embedding-004",
-    "models/text-embedding-004",
-    "models/embedding-001",
-    "embedding-001"
+    "models/text-embedding-004"
 ]
 
 class GeminiEmbeddingProvider(EmbeddingProvider):
     """
-    Embedding provider using Google's text-embedding-004 model.
+    Embedding provider using Google's gemini-embedding-001 model.
     Includes smart model candidate resolution and high-accuracy offline pseudo-embeddings.
     """
 
-    def __init__(self, model_name: str = "text-embedding-004", api_key: Optional[str] = None):
+    def __init__(self, model_name: str = "models/gemini-embedding-001", api_key: Optional[str] = None):
         self.model_name = model_name
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         if self.api_key:

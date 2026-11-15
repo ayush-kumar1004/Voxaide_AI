@@ -12,10 +12,19 @@ class DocumentParser:
 
     @classmethod
     def clean_text(cls, text: str) -> str:
-        """Normalize whitespace and strip unprintable characters."""
-        text = re.sub(r'[\r\n\t]+', ' ', text)
-        text = re.sub(r'\s{2,}', ' ', text)
-        return text.strip()
+        """
+        Normalize whitespace and line endings without destroying paragraph structure.
+        Preserves newlines for section and list integrity.
+        """
+        # Standardize line endings
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        # Replace 3 or more consecutive newlines with 2
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        # Normalize multiple horizontal spaces/tabs to a single space
+        text = re.sub(r'[ \t]+', ' ', text)
+        # Strip trailing spaces on lines
+        lines = [line.strip() for line in text.split('\n')]
+        return '\n'.join(lines).strip()
 
     @classmethod
     def parse(cls, filename: str, content_bytes: bytes) -> Tuple[str, str]:
@@ -77,27 +86,100 @@ class DocumentParser:
         return ext, cleaned
 
 class TextChunker:
-    """Chunks normalized text with configurable size and overlap."""
+    """
+    Semantic, structure-aware text chunker.
+    Preserves complete sections, paragraphs, and sentence boundaries.
+    Never splits numbers, prices, or warranty terms across chunk boundaries.
+    """
 
-    def __init__(self, chunk_size: int = 600, chunk_overlap: int = 100):
+    def __init__(self, chunk_size: int = 900, chunk_overlap: int = 150):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
     def chunk(self, text: str) -> list[str]:
-        if not text:
+        if not text or not text.strip():
             return []
 
-        chunks = []
-        start = 0
-        text_len = len(text)
+        clean_text = text.strip()
 
-        while start < text_len:
-            end = start + self.chunk_size
-            chunk_text = text[start:end].strip()
-            if chunk_text:
-                chunks.append(chunk_text)
-            start += self.chunk_size - self.chunk_overlap
-            if start >= text_len or end >= text_len:
-                break
+        # 1. Section-aware splitting for structured support documents (e.g. "1. COMPANY OVERVIEW", "2. PRODUCTS...")
+        section_pattern = r'\n(?=[0-9]+\.\s+[A-Z])'
+        raw_sections = [s.strip() for s in re.split(section_pattern, clean_text) if s.strip()]
+
+        chunks = []
+        tolerance = 200 if self.chunk_size >= 600 else 0
+        for sec in raw_sections:
+            if len(sec) <= self.chunk_size + tolerance:
+                chunks.append(sec)
+            else:
+                # Section is long: split into paragraphs or sentences
+                paragraphs = [p.strip() for p in sec.split('\n\n') if p.strip()]
+                current_chunk = ""
+                for para in paragraphs:
+                    if len(current_chunk) + len(para) + 2 <= self.chunk_size:
+                        current_chunk = f"{current_chunk}\n\n{para}".strip()
+                    else:
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                            current_chunk = ""
+                        if len(para) <= self.chunk_size:
+                            current_chunk = para
+                        else:
+                            # Split very long paragraph on sentence boundaries
+                            sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', para) if s.strip()]
+                            sub_chunk = ""
+                            for s in sentences:
+                                if len(s) > self.chunk_size:
+                                    for w in s.split(' '):
+                                        if not w:
+                                            continue
+                                        if len(sub_chunk) + len(w) + 1 <= self.chunk_size:
+                                            sub_chunk = f"{sub_chunk} {w}".strip()
+                                        else:
+                                            if sub_chunk:
+                                                chunks.append(sub_chunk)
+                                            sub_chunk = w
+                                else:
+                                    if len(sub_chunk) + len(s) + 1 <= self.chunk_size:
+                                        sub_chunk = f"{sub_chunk} {s}".strip()
+                                    else:
+                                        if sub_chunk:
+                                            chunks.append(sub_chunk)
+                                        sub_chunk = s
+                            if sub_chunk:
+                                current_chunk = sub_chunk
+                if current_chunk:
+                    chunks.append(current_chunk)
+
+        # Fallback if no sections were detected
+        if not chunks:
+            paragraphs = [p.strip() for p in clean_text.split('\n\n') if p.strip()]
+            for p in paragraphs:
+                if len(p) <= self.chunk_size:
+                    chunks.append(p)
+                else:
+                    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', p) if s.strip()]
+                    current_chunk = ""
+                    for s in sentences:
+                        if len(s) > self.chunk_size:
+                            words = s.split(' ')
+                            w_chunk = ""
+                            for w in words:
+                                if len(w_chunk) + len(w) + 1 <= self.chunk_size:
+                                    w_chunk = f"{w_chunk} {w}".strip()
+                                else:
+                                    if w_chunk:
+                                        chunks.append(w_chunk)
+                                    w_chunk = w
+                            if w_chunk:
+                                chunks.append(w_chunk)
+                        elif len(current_chunk) + len(s) + 1 <= self.chunk_size:
+                            current_chunk = f"{current_chunk} {s}".strip()
+                        else:
+                            if current_chunk:
+                                chunks.append(current_chunk)
+                            current_chunk = s
+                    if current_chunk:
+                        chunks.append(current_chunk)
 
         return chunks

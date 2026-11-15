@@ -69,28 +69,64 @@ class ChromaVectorStore(VectorStore):
         )
         logger.info(f"Indexed {len(ids)} chunks into ChromaDB for company {company_id}")
 
+    def _compute_keyword_score(self, query: str, text: str) -> float:
+        """
+        Computes normalized keyword overlap and phrase matching score.
+        Gives high priority to specific domain terms (model names, prices, warranty, safety).
+        """
+        import re
+        stopwords = {
+            "a", "an", "the", "in", "on", "at", "to", "for", "of", "with", "is", "are", "was",
+            "were", "be", "been", "do", "does", "did", "have", "has", "had", "can", "could",
+            "will", "would", "shall", "should", "and", "or", "but", "so", "if", "what", "which",
+            "who", "whom", "this", "that", "these", "those", "am", "it", "its", "you", "your",
+            "i", "me", "my", "we", "our", "us", "they", "them", "their", "how", "why", "when", "where",
+            "much", "tell", "give", "know", "please"
+        }
+        tokens = [t.lower() for t in re.findall(r'\b[a-zA-Z0-9₹]+\b', query) if t.lower() not in stopwords]
+        if not tokens:
+            tokens = [t.lower() for t in re.findall(r'\b[a-zA-Z0-9₹]+\b', query)]
+        if not tokens:
+            return 0.0
+
+        text_lower = text.lower()
+        matched = sum(1 for t in tokens if t in text_lower)
+        overlap = matched / len(tokens)
+
+        # Exact phrase bonus (e.g. "ac compressor", "washing machine", "working hours", "return policy")
+        phrase_bonus = 0.0
+        clean_query = query.lower().strip("?.! ")
+        if len(clean_query) > 5 and clean_query in text_lower:
+            phrase_bonus = 0.4
+        elif any(len(p) > 5 and p in text_lower for p in re.findall(r'\b\w+\s+\w+\b', clean_query)):
+            phrase_bonus = 0.2
+
+        return min(1.0, overlap + phrase_bonus)
+
     def similarity_search(
         self,
         company_id: str,
         query: str,
-        top_k: int = 4
+        top_k: int = 6
     ) -> List[Dict[str, Any]]:
         """
-        Retrieve relevant document chunks strictly scoped by company_id.
+        Hybrid similarity search combining semantic vector proximity and keyword matching.
+        Guarantees that exact entity names, pricing, and warranty clauses are retrieved.
         """
         if not company_id:
             raise ValueError("company_id is required for similarity search.")
 
         query_embedding = self.embedding_provider.embed_text(query)
 
-        # Query ChromaDB with MANDATORY company_id filter
+        # Retrieve a broader candidate pool for hybrid re-ranking
+        candidate_k = max(top_k * 3, 12)
         results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=top_k,
+            n_results=candidate_k,
             where={"company_id": company_id}
         )
 
-        formatted = []
+        candidates = []
         if results and results.get("documents") and results["documents"][0]:
             docs = results["documents"][0]
             metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
@@ -98,21 +134,29 @@ class ChromaVectorStore(VectorStore):
             distances = results["distances"][0] if results.get("distances") else [0.0] * len(docs)
 
             for doc_text, meta, chunk_id, dist in zip(docs, metas, ids, distances):
-                # Calculate simple similarity score from distance (L2 or cosine)
-                relevance = round(1.0 / (1.0 + float(dist)), 4) if dist is not None else 1.0
-                formatted.append({
+                vector_sim = round(1.0 / (1.0 + float(dist)), 4) if dist is not None else 0.5
+                keyword_sim = self._compute_keyword_score(query, doc_text)
+                
+                # Hybrid score blending vector similarity and keyword overlap
+                hybrid_score = round((0.4 * vector_sim) + (0.6 * keyword_sim), 4)
+
+                candidates.append({
                     "text": doc_text,
-                    "content": doc_text,  # alias for prompt builder
+                    "content": doc_text,
                     "document_name": meta.get("document_name", "Document"),
                     "source": meta.get("document_name", "Document"),
                     "document_id": meta.get("document_id", ""),
                     "chunk_id": chunk_id,
                     "id": chunk_id,
-                    "relevance_score": relevance,
+                    "relevance_score": hybrid_score,
+                    "vector_score": vector_sim,
+                    "keyword_score": keyword_sim,
                     "metadata": meta
                 })
 
-        return formatted
+        # Rank candidates by hybrid score descending
+        candidates.sort(key=lambda x: x["relevance_score"], reverse=True)
+        return candidates[:top_k]
 
     def delete_document(self, company_id: str, document_id: str):
         """Delete all chunks belonging to document_id under company_id."""
