@@ -112,6 +112,17 @@ def verify_razorpay_payment():
             except Exception as db_err:
                 logger.warning("Could not persist subscription to Firestore", error=str(db_err))
 
+            # Update in-memory company cache
+            from app.services.company_service import company_service
+            if company_id in company_service._companies_mem:
+                company_service._companies_mem[company_id]["subscription"] = {
+                    "plan_id": plan_id,
+                    "status": "active",
+                    "payment_id": payment_id,
+                    "order_id": order_id,
+                    "activated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+                }
+
             return jsonify({
                 "success": True,
                 "message": f"Payment verified. Plan '{plan_id}' activated for {company_id}.",
@@ -126,3 +137,127 @@ def verify_razorpay_payment():
     except Exception as e:
         logger.error("Error verifying payment", error=str(e))
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+PLAN_QUOTAS = {
+    "starter": {
+        "plan_name": "Starter",
+        "max_agents": 1,
+        "max_call_minutes": 500,
+        "custom_voices": False,
+        "postgres_access": False,
+        "priority_support": False
+    },
+    "growth": {
+        "plan_name": "Growth",
+        "max_agents": 5,
+        "max_call_minutes": 2500,
+        "custom_voices": True,
+        "postgres_access": True,
+        "priority_support": True
+    },
+    "enterprise": {
+        "plan_name": "Enterprise",
+        "max_agents": 25,
+        "max_call_minutes": 10000,
+        "custom_voices": True,
+        "postgres_access": True,
+        "priority_support": True
+    }
+}
+
+
+@billing_bp.route("/webhook/razorpay", methods=["POST"])
+def razorpay_webhook():
+    """
+    Production Razorpay Webhook listener.
+    Verifies HMAC SHA256 signature and handles payment.captured, order.paid, and subscription events.
+    """
+    raw_payload = request.data
+    webhook_signature = request.headers.get("X-Razorpay-Signature", "")
+    webhook_secret = os.environ.get("RAZORPAY_WEBHOOK_SECRET")
+
+    if webhook_secret:
+        expected_sig = hmac.new(webhook_secret.encode("utf-8"), raw_payload, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_sig, webhook_signature):
+            logger.warning("Razorpay webhook signature verification failed")
+            return jsonify({"error": "Invalid webhook signature"}), 400
+
+    data = request.get_json(silent=True) or {}
+    event = data.get("event", "unknown")
+    payload = data.get("payload", {})
+
+    logger.info("Razorpay webhook received", event=event)
+
+    # Resolve company_id and plan_id from payment or order notes
+    payment_entity = payload.get("payment", {}).get("entity", {})
+    order_entity = payload.get("order", {}).get("entity", {})
+    notes = payment_entity.get("notes") or order_entity.get("notes") or {}
+
+    company_id = notes.get("company_id")
+    plan_id = notes.get("plan_id", "growth")
+
+    if company_id and event in ("payment.captured", "order.paid", "subscription.activated", "subscription.charged"):
+        from app.services.company_service import company_service
+        sub_record = {
+            "plan_id": plan_id,
+            "status": "active",
+            "event": event,
+            "payment_id": payment_entity.get("id"),
+            "order_id": order_entity.get("id") or payment_entity.get("order_id"),
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        }
+        if company_id in company_service._companies_mem:
+            company_service._companies_mem[company_id]["subscription"] = sub_record
+
+        try:
+            import firebase_admin
+            from firebase_admin import firestore
+            if firebase_admin._apps:
+                db = firestore.client()
+                db.collection("companies").document(company_id).set({"subscription": sub_record}, merge=True)
+        except Exception as err:
+            logger.warning("Could not persist webhook subscription update", error=str(err))
+
+    return jsonify({"status": "received", "event": event}), 200
+
+
+@billing_bp.route("/companies/<company_id>/quota", methods=["GET"])
+def get_company_quota(company_id: str):
+    """
+    Returns current plan tier, quota limits, and usage metrics for the company.
+    """
+    from app.services.company_service import company_service
+    from app.services.telephony_service import telephony_service
+
+    company = company_service.get_company(company_id)
+    sub = {}
+    if company_id in company_service._companies_mem:
+        sub = company_service._companies_mem[company_id].get("subscription", {})
+    elif company and getattr(company, "subscription", None):
+        sub = company.subscription
+
+    plan_id = sub.get("plan_id", "growth") if sub else "growth"
+    quota = PLAN_QUOTAS.get(plan_id, PLAN_QUOTAS["growth"])
+
+    agents = company_service.list_agents(company_id)
+    calls = telephony_service.list_call_logs(company_id)
+    total_seconds = sum(c.get("duration_seconds", 0) for c in calls)
+    used_minutes = round(total_seconds / 60, 1)
+
+    return jsonify({
+        "success": True,
+        "company_id": company_id,
+        "plan_id": plan_id,
+        "plan_name": quota["plan_name"],
+        "status": sub.get("status", "active"),
+        "quotas": {
+            "max_agents": quota["max_agents"],
+            "agents_used": len(agents),
+            "max_call_minutes": quota["max_call_minutes"],
+            "call_minutes_used": used_minutes,
+            "custom_voices": quota["custom_voices"],
+            "postgres_access": quota["postgres_access"],
+            "priority_support": quota["priority_support"]
+        }
+    }), 200

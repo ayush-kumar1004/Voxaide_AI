@@ -117,18 +117,26 @@ class TelephonyService:
         calls.sort(key=lambda c: c.get("created_at", ""), reverse=True)
         return calls
 
-    def generate_twiml_greeting(self, company_id: str, host_url: str) -> str:
+    def generate_twiml_greeting(self, company_id: str, host_url: str, stream_mode: bool = False) -> str:
         """
         Generates initial TwiML XML for an inbound call.
-        Greets the caller and presents a Speech <Gather>.
+        Supports either Twilio Media Streams (WebSocket) or HTTP <Gather>.
         """
         company = company_service.get_company(company_id)
         config = company_service.get_agent_config(company_id)
 
         greeting = config.greeting if config else f"Welcome to {company.name if company else 'VoxAide'}. How may I help you today?"
-        gather_action = f"{host_url.rstrip('/')}/api/telephony/voice/gather?company_id={company_id}"
-
         response = ET.Element("Response")
+
+        if stream_mode:
+            # Twilio Media Streams bidirectional real-time audio WebSocket
+            clean_host = host_url.rstrip("/").replace("http://", "").replace("https://", "")
+            wss_url = f"wss://{clean_host}/api/telephony/media-stream?company_id={company_id}"
+            connect = ET.SubElement(response, "Connect")
+            ET.SubElement(connect, "Stream", url=wss_url)
+            return ET.tostring(response, encoding="utf-8", method="xml").decode("utf-8")
+
+        gather_action = f"{host_url.rstrip('/')}/api/telephony/voice/gather?company_id={company_id}"
         gather = ET.SubElement(
             response,
             "Gather",
@@ -147,6 +155,70 @@ class TelephonyService:
         ET.SubElement(response, "Hangup")
 
         return ET.tostring(response, encoding="utf-8", method="xml").decode("utf-8")
+
+    def simulate_phone_call(
+        self,
+        company_id: str,
+        caller_phone: str,
+        user_message: str,
+        call_sid: Optional[str] = None,
+        base_url: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Executes a simulated phone call turn for browser-based testing and validation.
+        Routes speech through the agent orchestrator, synthesizes speech, and logs the call.
+        """
+        from app.services.agent_orchestrator import agent_orchestrator, AgentRequest
+
+        active_sid = call_sid or f"sim_call_{uuid.uuid4().hex[:10]}"
+
+        # Initialize call record if new
+        if active_sid not in self._call_logs:
+            self.record_call_start(
+                call_sid=active_sid,
+                company_id=company_id,
+                from_number=caller_phone or "+1 (555) 019-2834",
+                to_number="+1 (800) VOX-AIDE",
+                direction="inbound-simulated"
+            )
+
+        # Process through Agent Orchestrator
+        agent_req = AgentRequest(
+            company_id=company_id,
+            message=user_message,
+            conversation_id=f"call_{active_sid}",
+            channel="phone",
+            metadata={"caller_phone": caller_phone, "simulated": True}
+        )
+        agent_res = agent_orchestrator.process(agent_req)
+
+        # Synthesize audio
+        audio_url = audio_service.synthesize_speech_url(
+            text=agent_res.text,
+            base_url=base_url
+        )
+
+        # Log turn
+        self.record_call_turn(
+            call_sid=active_sid,
+            user_text=user_message,
+            assistant_text=agent_res.text
+        )
+
+        # Auto-detect goodbye/completion
+        lower_res = agent_res.text.lower()
+        is_completed = any(p in lower_res for p in ["goodbye", "have a great day", "bye for now"])
+        if is_completed:
+            self.record_call_end(active_sid, duration_seconds=45, status="completed")
+
+        return {
+            "call_sid": active_sid,
+            "response": agent_res.text,
+            "audio_url": audio_url,
+            "latency_ms": agent_res.latency_ms,
+            "is_completed": is_completed,
+            "status": "completed" if is_completed else "in-progress"
+        }
 
     def generate_twiml_turn(
         self,

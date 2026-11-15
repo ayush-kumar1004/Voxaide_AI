@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, g
 from app.core.security import require_auth, require_company_access
 from app.services.company_service import company_service
+from app.services.audio_service import audio_service
 from app.core.logging import logger
 
 company_bp = Blueprint("company_routes", __name__, url_prefix="/api/companies")
@@ -158,5 +159,40 @@ def company_agent_chat(company_id: str):
         "sources": response.sources,
         "should_escalate": response.should_escalate,
         "latency_ms": response.latency_ms
+    }), 200
+
+@company_bp.route("/<company_id>/voice/preview", methods=["POST"])
+@require_auth
+@require_company_access("company_id")
+def preview_company_voice(company_id: str):
+    """
+    Synthesizes a short voice preview sample for Edge-TTS or ElevenLabs.
+    """
+    data = request.get_json() or {}
+    text = data.get("text", "Hello! This is a preview of your AI customer support voice on VoxAide.")
+    voice_model = data.get("voice_model", "en-US-JennyNeural")
+    provider = data.get("provider", "edge-tts")
+    elevenlabs_api_key = data.get("elevenlabs_api_key")
+
+    base_url = request.host_url.rstrip("/")
+    if request.headers.get("X-Forwarded-Proto") == "https" or "onrender.com" in request.host:
+        base_url = base_url.replace("http://", "https://")
+
+    preview_url = audio_service.generate_preview(
+        text=text,
+        voice_model=voice_model,
+        provider=provider,
+        elevenlabs_api_key=elevenlabs_api_key,
+        base_url=base_url
+    )
+
+    if not preview_url:
+        return jsonify({"success": False, "error": "Could not synthesize audio preview."}), 500
+
+    return jsonify({
+        "success": True,
+        "preview_url": preview_url,
+        "voice_model": voice_model,
+        "provider": provider
     }), 200
 

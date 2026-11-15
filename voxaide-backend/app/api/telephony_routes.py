@@ -49,7 +49,14 @@ def handle_inbound_call():
     logger.info("Inbound telephony call received", call_sid=call_sid, company_id=company_id, from_number=from_number)
 
     host_url = request.host_url.rstrip("/")
-    twiml_xml = telephony_service.generate_twiml_greeting(company_id=company_id, host_url=host_url)
+    if request.headers.get("X-Forwarded-Proto") == "https" or "onrender.com" in request.host:
+        host_url = host_url.replace("http://", "https://")
+    stream_mode = request.args.get("stream", "false").lower() in ("true", "1")
+    twiml_xml = telephony_service.generate_twiml_greeting(
+        company_id=company_id,
+        host_url=host_url,
+        stream_mode=stream_mode
+    )
     return Response(twiml_xml, mimetype="text/xml")
 
 @telephony_bp.route("/api/telephony/voice/gather", methods=["POST", "GET"])
@@ -157,3 +164,35 @@ def list_company_call_logs(company_id: str):
     """Lists call logs for this company."""
     calls = telephony_service.list_call_logs(company_id)
     return jsonify({"call_logs": calls, "count": len(calls)}), 200
+
+@telephony_bp.route("/api/companies/<company_id>/telephony/simulate-call", methods=["POST"])
+@require_auth
+@require_company_access("company_id")
+def simulate_company_call(company_id: str):
+    """
+    Endpoint for dashboard live phone call simulator.
+    """
+    data = request.get_json() or {}
+    message = data.get("message", "").strip()
+    caller_phone = data.get("caller_phone", "+1 (555) 019-2834")
+    call_sid = data.get("call_sid")
+
+    if not message:
+        return jsonify({"success": False, "error": "message is required."}), 400
+
+    base_url = request.host_url.rstrip("/")
+    if request.headers.get("X-Forwarded-Proto") == "https" or "onrender.com" in request.host:
+        base_url = base_url.replace("http://", "https://")
+
+    result = telephony_service.simulate_phone_call(
+        company_id=company_id,
+        caller_phone=caller_phone,
+        user_message=message,
+        call_sid=call_sid,
+        base_url=base_url
+    )
+
+    return jsonify({
+        "success": True,
+        **result
+    }), 200

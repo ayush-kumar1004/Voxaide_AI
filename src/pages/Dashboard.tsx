@@ -34,7 +34,15 @@ import {
   Code,
   Copy,
   CheckCheck,
-  Play
+  Play,
+  Volume2,
+  VolumeX,
+  PhoneOff,
+  PhoneCall,
+  Mic,
+  MicOff,
+  Zap,
+  Crown
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -446,6 +454,7 @@ const Dashboard = () => {
       if (res.ok) {
         toast({ title: "Agent Deleted", description: "Removed agent from workspace." });
         loadAgents(companyId);
+        loadQuota(companyId);
       }
     } catch (err) {
       toast({ title: "Error", description: "Failed to delete agent.", variant: "destructive" });
@@ -460,6 +469,191 @@ const Dashboard = () => {
     setTimeout(() => setCopiedScript(false), 2500);
   };
 
+  // Phase 3: Quota Data State
+  const [quotaData, setQuotaData] = useState<any>(null);
+
+  const loadQuota = async (targetCompany = companyId) => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/billing/companies/${targetCompany}/quota`);
+      if (res.ok) {
+        const data = await res.json();
+        setQuotaData(data);
+      }
+    } catch (err) {
+      console.warn("Could not load quota data", err);
+    }
+  };
+
+  // Phase 3: Custom Brand Voice Preview State
+  const [voiceProvider, setVoiceProvider] = useState<"edge-tts" | "elevenlabs">("edge-tts");
+  const [elevenLabsApiKey, setElevenLabsApiKey] = useState<string>("");
+  const [isPreviewLoading, setIsPreviewLoading] = useState<boolean>(false);
+  const [playingPreviewUrl, setPlayingPreviewUrl] = useState<string | null>(null);
+
+  const handlePreviewVoice = async () => {
+    try {
+      setIsPreviewLoading(true);
+      const res = await fetch(`${apiBaseUrl}/api/agent/companies/${companyId}/voice/preview`, {
+        method: "POST",
+        headers: {
+          ...getHeaders(companyId),
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          text: newAgent.greeting || "Hello! This is a preview of your AI voice agent on VoxAide.",
+          voice_model: newAgent.voice_model || "en-US-JennyNeural",
+          provider: voiceProvider,
+          elevenlabs_api_key: elevenLabsApiKey || undefined
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.preview_url) {
+        setPlayingPreviewUrl(data.preview_url);
+        const audio = new Audio(data.preview_url);
+        audio.onended = () => setPlayingPreviewUrl(null);
+        audio.onerror = () => {
+          setPlayingPreviewUrl(null);
+          toast({ title: "Preview Error", description: "Could not stream audio sample.", variant: "destructive" });
+        };
+        await audio.play();
+        toast({ title: "Playing Voice Preview", description: `Voice: ${data.voice_model} (${data.provider})` });
+      } else {
+        toast({ title: "Preview Failed", description: data.error || "Could not synthesize preview.", variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "Preview Failed", description: e.message || "Failed to reach voice engine.", variant: "destructive" });
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  // Phase 3: Live Telephony & Phone Simulator State
+  const [simCallerNumber, setSimCallerNumber] = useState<string>("+1 (555) 019-2834");
+  const [isSimCallActive, setIsSimCallActive] = useState<boolean>(false);
+  const [simCallSid, setSimCallSid] = useState<string>("");
+  const [simCallTimer, setSimCallTimer] = useState<number>(0);
+  const [simCallTranscript, setSimCallTranscript] = useState<{ role: "caller" | "agent"; text: string; time: string }[]>([]);
+  const [simCallerMessage, setSimCallerMessage] = useState<string>("");
+  const [isSimSpeaking, setIsSimSpeaking] = useState<boolean>(false);
+
+  useEffect(() => {
+    let interval: any = null;
+    if (isSimCallActive) {
+      interval = setInterval(() => {
+        setSimCallTimer(prev => prev + 1);
+      }, 1000);
+    } else {
+      setSimCallTimer(0);
+    }
+    return () => clearInterval(interval);
+  }, [isSimCallActive]);
+
+  const handleStartSimCall = async () => {
+    const newSid = `sim_call_${Math.random().toString(36).substring(2, 9)}`;
+    setSimCallSid(newSid);
+    setIsSimCallActive(true);
+    setSimCallTimer(0);
+    const greetingText = "Thank you for calling support! How may I assist you today?";
+    const initialTranscript = [{
+      role: "agent" as const,
+      text: greetingText,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }];
+    setSimCallTranscript(initialTranscript);
+
+    try {
+      setIsSimSpeaking(true);
+      const res = await fetch(`${apiBaseUrl}/api/agent/companies/${companyId}/voice/preview`, {
+        method: "POST",
+        headers: { ...getHeaders(companyId), "Content-Type": "application/json" },
+        body: JSON.stringify({ text: greetingText, voice_model: "en-US-JennyNeural", provider: "edge-tts" })
+      });
+      const data = await res.json();
+      if (res.ok && data.preview_url) {
+        const audio = new Audio(data.preview_url);
+        audio.onended = () => setIsSimSpeaking(false);
+        audio.onerror = () => setIsSimSpeaking(false);
+        await audio.play();
+      } else {
+        setIsSimSpeaking(false);
+      }
+    } catch {
+      setIsSimSpeaking(false);
+    }
+    toast({ title: "Call Connected", description: `Inbound line active from ${simCallerNumber}` });
+  };
+
+  const handleSendSimCallTurn = async (customMessage?: string) => {
+    const messageToSend = customMessage || simCallerMessage;
+    if (!messageToSend.trim()) return;
+
+    const userTurn = {
+      role: "caller" as const,
+      text: messageToSend,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    setSimCallTranscript(prev => [...prev, userTurn]);
+    setSimCallerMessage("");
+    setIsSimSpeaking(true);
+
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/companies/${companyId}/telephony/simulate-call`, {
+        method: "POST",
+        headers: {
+          ...getHeaders(companyId),
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          message: messageToSend,
+          caller_phone: simCallerNumber,
+          call_sid: simCallSid
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const agentTurn = {
+          role: "agent" as const,
+          text: data.response,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        setSimCallTranscript(prev => [...prev, agentTurn]);
+
+        if (data.audio_url) {
+          const audio = new Audio(data.audio_url);
+          audio.onended = () => {
+            setIsSimSpeaking(false);
+            if (data.is_completed) {
+              handleEndSimCall();
+            }
+          };
+          audio.onerror = () => setIsSimSpeaking(false);
+          await audio.play();
+        } else {
+          setIsSimSpeaking(false);
+        }
+
+        if (data.is_completed) {
+          toast({ title: "Call Concluded", description: "Agent politely concluded the telephone conversation." });
+        }
+      } else {
+        setIsSimSpeaking(false);
+        toast({ title: "Call Error", description: data.error || "Failed to process call turn.", variant: "destructive" });
+      }
+    } catch (err: any) {
+      setIsSimSpeaking(false);
+      toast({ title: "Call Error", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleEndSimCall = async () => {
+    setIsSimCallActive(false);
+    toast({ title: "Call Ended", description: `Call duration: ${simCallTimer} seconds logged.` });
+    loadTelephony(companyId);
+    loadQuota(companyId);
+  };
+
   const refreshAll = (targetCompany = companyId) => {
     loadDocuments(targetCompany);
     loadAppointments(targetCompany);
@@ -468,6 +662,7 @@ const Dashboard = () => {
     loadTelephony(targetCompany);
     loadDbConnector(targetCompany);
     loadAgents(targetCompany);
+    loadQuota(targetCompany);
   };
 
   useEffect(() => {
@@ -674,32 +869,62 @@ const Dashboard = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-3xl font-bold">Company Dashboard</h1>
-                <Badge variant="outline" className="text-xs bg-primary/5 text-primary border-primary/20">
-                  Enterprise SaaS
+                <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20 flex items-center gap-1 font-semibold">
+                  <Crown className="h-3 w-3" />
+                  {quotaData?.plan_name || "Growth"} Plan
                 </Badge>
               </div>
               <p className="text-muted-foreground mt-1">Manage your multi-tenant AI voice & knowledge platform</p>
             </div>
             
-            {/* Tenant Selector */}
-            <div className="flex items-center gap-2 bg-muted/60 p-2 rounded-lg border border-border">
-              <Building2 className="h-4 w-4 text-primary" />
-              <span className="text-xs font-semibold text-muted-foreground">Active Tenant:</span>
-              <Input
-                value={companyId}
-                onChange={(e) => setCompanyId(e.target.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_'))}
-                className="h-8 w-36 text-xs font-mono font-semibold bg-background"
-                placeholder="company_id"
-              />
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-8 px-2"
-                onClick={() => refreshAll(companyId)}
-                title="Refresh All Company Data"
-              >
-                <RefreshCw className={`h-4 w-4 ${isLoadingDocs ? 'animate-spin' : ''}`} />
-              </Button>
+            {/* Phase 3: Quota Meters & Tenant Selector */}
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Quota Indicators */}
+              <div className="hidden md:flex items-center gap-3 bg-muted/40 px-3 py-1.5 rounded-lg border border-border text-xs">
+                <div className="flex items-center gap-1.5" title="Agents deployed under current plan limit">
+                  <Bot className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-muted-foreground">Agents:</span>
+                  <span className="font-semibold text-foreground">
+                    {quotaData?.quotas?.agents_used ?? agents.length} / {quotaData?.quotas?.max_agents ?? 5}
+                  </span>
+                </div>
+                <div className="h-3 w-px bg-border" />
+                <div className="flex items-center gap-1.5" title="Call minutes used this billing cycle">
+                  <Phone className="h-3.5 w-3.5 text-emerald-600" />
+                  <span className="text-muted-foreground">Call Mins:</span>
+                  <span className="font-semibold text-foreground">
+                    {quotaData?.quotas?.call_minutes_used ?? 0} / {quotaData?.quotas?.max_call_minutes ?? 2500}
+                  </span>
+                </div>
+                <div className="h-3 w-px bg-border" />
+                <a 
+                  href="/pricing" 
+                  className="text-primary hover:underline text-[11px] font-semibold flex items-center gap-0.5"
+                >
+                  <Zap className="h-3 w-3" /> Upgrade
+                </a>
+              </div>
+
+              {/* Tenant Selector */}
+              <div className="flex items-center gap-2 bg-muted/60 p-2 rounded-lg border border-border">
+                <Building2 className="h-4 w-4 text-primary" />
+                <span className="text-xs font-semibold text-muted-foreground">Active Tenant:</span>
+                <Input
+                  value={companyId}
+                  onChange={(e) => setCompanyId(e.target.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_'))}
+                  className="h-8 w-36 text-xs font-mono font-semibold bg-background"
+                  placeholder="company_id"
+                />
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-8 px-2"
+                  onClick={() => refreshAll(companyId)}
+                  title="Refresh All Company Data"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isLoadingDocs ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -867,12 +1092,90 @@ const Dashboard = () => {
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-semibold text-foreground mb-1 block">Neural Voice Engine</label>
-                      <Input
-                        placeholder="en-US-JennyNeural, hi-IN-SwaraNeural, or ElevenLabs ID"
-                        value={newAgent.voice_model}
-                        onChange={(e) => setNewAgent({ ...newAgent, voice_model: e.target.value })}
-                      />
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-semibold text-foreground">Voice Engine & Provider</label>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVoiceProvider("edge-tts");
+                              setNewAgent({ ...newAgent, voice_model: "en-US-JennyNeural" });
+                            }}
+                            className={`text-[10px] px-2 py-0.5 rounded font-medium ${voiceProvider === 'edge-tts' ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'}`}
+                          >
+                            Edge-TTS (Zero Cost)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVoiceProvider("elevenlabs");
+                              setNewAgent({ ...newAgent, voice_model: "21m00Tcm4TlvDq8ikWAM" });
+                            }}
+                            className={`text-[10px] px-2 py-0.5 rounded font-medium ${voiceProvider === 'elevenlabs' ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'}`}
+                          >
+                            ElevenLabs (Cloning)
+                          </button>
+                        </div>
+                      </div>
+
+                      {voiceProvider === "edge-tts" ? (
+                        <div className="flex gap-2">
+                          <select
+                            className="flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                            value={newAgent.voice_model}
+                            onChange={(e) => setNewAgent({ ...newAgent, voice_model: e.target.value })}
+                          >
+                            <option value="en-US-JennyNeural">en-US-JennyNeural (US Female - Warm & Helpful)</option>
+                            <option value="en-US-GuyNeural">en-US-GuyNeural (US Male - Professional & Clear)</option>
+                            <option value="hi-IN-SwaraNeural">hi-IN-SwaraNeural (Indian Bilingual - Hindi & English)</option>
+                            <option value="hi-IN-MadhurNeural">hi-IN-MadhurNeural (Indian Male - Hindi & English)</option>
+                            <option value="en-GB-SoniaNeural">en-GB-SoniaNeural (UK British Female - Executive)</option>
+                            <option value="en-IN-NeerjaNeural">en-IN-NeerjaNeural (Indian Female - Expressive)</option>
+                          </select>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9 px-2.5 text-xs flex items-center gap-1"
+                            onClick={handlePreviewVoice}
+                            disabled={isPreviewLoading}
+                            title="Listen to this voice"
+                          >
+                            {isPreviewLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : playingPreviewUrl ? <Volume2 className="h-3.5 w-3.5 text-primary animate-pulse" /> : <Play className="h-3.5 w-3.5" />}
+                            Preview
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="ElevenLabs Voice ID (e.g. 21m00Tcm4TlvDq8ikWAM)"
+                              value={newAgent.voice_model}
+                              onChange={(e) => setNewAgent({ ...newAgent, voice_model: e.target.value })}
+                              className="text-xs"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-9 px-2.5 text-xs flex items-center gap-1"
+                              onClick={handlePreviewVoice}
+                              disabled={isPreviewLoading}
+                              title="Listen to this cloned voice"
+                            >
+                              {isPreviewLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : playingPreviewUrl ? <Volume2 className="h-3.5 w-3.5 text-primary animate-pulse" /> : <Play className="h-3.5 w-3.5" />}
+                              Preview
+                            </Button>
+                          </div>
+                          <Input
+                            type="password"
+                            placeholder="Optional: Company ElevenLabs API Key (overrides default)"
+                            value={elevenLabsApiKey}
+                            onChange={(e) => setElevenLabsApiKey(e.target.value)}
+                            className="text-xs"
+                          />
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-foreground mb-1 block">Opening Greeting Message</label>
@@ -1524,9 +1827,126 @@ const Dashboard = () => {
                   </div>
                 </Card>
 
-                <Card className="p-6 lg:col-span-2">
-                  <h3 className="text-lg font-semibold mb-4">Connected Lines & Call Logs</h3>
-                  <div className="space-y-4">
+                <Card className="p-6 lg:col-span-2 space-y-6">
+                  {/* Live Phone Call Simulator */}
+                  <div className="p-5 rounded-xl border border-primary/20 bg-primary/[0.02]">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                      <div>
+                        <h4 className="text-base font-bold text-foreground flex items-center gap-2">
+                          <PhoneIncoming className="h-4 w-4 text-primary" /> Live Phone Call Simulator
+                        </h4>
+                        <p className="text-xs text-muted-foreground">
+                          Test your voice agent's real phone call behavior, natural latency, and audio synthesis in-browser.
+                        </p>
+                      </div>
+                      {!isSimCallActive ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            placeholder="Caller ID (e.g. +1 555-019-2834)"
+                            value={simCallerNumber}
+                            onChange={(e) => setSimCallerNumber(e.target.value)}
+                            className="h-8 w-44 text-xs font-mono"
+                          />
+                          <Button 
+                            size="sm" 
+                            className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-sm"
+                            onClick={handleStartSimCall}
+                          >
+                            <PhoneCall className="h-3.5 w-3.5" /> Call Inbound Line
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 flex items-center gap-1.5 font-mono text-xs">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                            Connected {String(Math.floor(simCallTimer / 60)).padStart(2, '0')}:{String(simCallTimer % 60).padStart(2, '0')}
+                          </Badge>
+                          <Button 
+                            size="sm" 
+                            variant="destructive" 
+                            className="h-8 text-xs flex items-center gap-1.5"
+                            onClick={handleEndSimCall}
+                          >
+                            <PhoneOff className="h-3.5 w-3.5" /> End Call
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Active Call Console */}
+                    {isSimCallActive ? (
+                      <div className="space-y-3 pt-3 border-t border-border">
+                        {/* Transcript Box */}
+                        <div className="h-44 overflow-y-auto p-3 rounded-lg bg-background border border-border space-y-2.5 text-xs font-mono">
+                          {simCallTranscript.map((turn, i) => (
+                            <div key={i} className={`flex gap-2 ${turn.role === 'caller' ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`max-w-[80%] p-2 rounded-lg ${turn.role === 'caller' ? 'bg-primary text-white' : 'bg-muted text-foreground border border-border'}`}>
+                                <div className="text-[10px] opacity-75 mb-0.5 flex items-center justify-between gap-2">
+                                  <span>{turn.role === 'caller' ? `Caller (${simCallerNumber})` : 'AI Voice Agent'}</span>
+                                  <span>{turn.time}</span>
+                                </div>
+                                <div className="text-xs font-sans">{turn.text}</div>
+                              </div>
+                            </div>
+                          ))}
+                          {isSimSpeaking && (
+                            <div className="flex items-center gap-2 text-xs text-primary font-sans italic">
+                              <Volume2 className="h-3.5 w-3.5 animate-pulse" /> Agent is speaking on line...
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Caller Quick Test Prompts */}
+                        <div className="flex flex-wrap gap-1.5">
+                          <span className="text-[11px] text-muted-foreground self-center">Caller:</span>
+                          {[
+                            "Where is my order #ZMT-8492?",
+                            "Can I book an appointment tomorrow at 11 AM?",
+                            "What are your business hours?",
+                            "Thank you, goodbye!"
+                          ].map((promptText, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => handleSendSimCallTurn(promptText)}
+                              disabled={isSimSpeaking}
+                              className="text-[10px] px-2 py-1 rounded-full bg-muted hover:bg-muted/80 text-foreground border border-border transition-colors"
+                            >
+                              "{promptText}"
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Caller Voice/Text Input */}
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Speak or type what the caller says..."
+                            value={simCallerMessage}
+                            onChange={(e) => setSimCallerMessage(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleSendSimCallTurn()}
+                            disabled={isSimSpeaking}
+                            className="text-xs h-9 bg-background"
+                          />
+                          <Button 
+                            size="sm" 
+                            className="h-9 px-3 text-xs" 
+                            onClick={() => handleSendSimCallTurn()}
+                            disabled={isSimSpeaking || !simCallerMessage.trim()}
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center border border-dashed rounded-lg bg-background/50 text-xs text-muted-foreground">
+                        <Phone className="h-6 w-6 mx-auto mb-1.5 opacity-40 text-primary" />
+                        Click <strong>"Call Inbound Line"</strong> to start a simulated telephone conversation and hear your voice agent respond.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Connected Lines & Call Logs */}
+                  <div className="space-y-4 pt-2">
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                         Active Telephone Numbers ({phoneNumbers.length})

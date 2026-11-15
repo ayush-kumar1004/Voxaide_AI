@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, g
 from app.core.security import require_auth, require_company_access
 from app.services.agent_orchestrator import agent_orchestrator, AgentRequest
+from app.services.audio_service import audio_service
 from app.core.logging import logger
 
 agent_bp = Blueprint("agent_routes", __name__, url_prefix="/api/agent")
@@ -115,10 +116,24 @@ def list_company_agents(company_id: str):
 @require_company_access("company_id")
 def create_company_agent(company_id: str):
     from app.services.company_service import company_service
+    from app.api.billing_routes import PLAN_QUOTAS
+
     data = request.get_json() or {}
     name = data.get("agent_name", "").strip()
     if not name:
         return jsonify({"success": False, "error": "Agent name is required."}), 400
+
+    # Quota check
+    existing_agents = company_service.list_agents(company_id)
+    sub = company_service._companies_mem.get(company_id, {}).get("subscription", {})
+    plan_id = sub.get("plan_id", "growth")
+    quota = PLAN_QUOTAS.get(plan_id, PLAN_QUOTAS["growth"])
+
+    if len(existing_agents) >= quota["max_agents"]:
+        return jsonify({
+            "success": False,
+            "error": f"Agent limit reached for your {quota['plan_name']} plan ({quota['max_agents']} max). Please upgrade to deploy more agents."
+        }), 403
 
     agent = company_service.create_agent(company_id, **data)
     return jsonify({
@@ -155,3 +170,39 @@ def delete_company_agent(company_id: str, agent_id: str):
     if not success:
         return jsonify({"success": False, "error": "Cannot delete agent or agent not found."}), 400
     return jsonify({"success": True, "message": "Agent deleted successfully."}), 200
+
+@agent_bp.route("/companies/<company_id>/voice/preview", methods=["POST"])
+@require_auth
+@require_company_access("company_id")
+def preview_voice(company_id: str):
+    """
+    Synthesizes a short voice preview sample for Edge-TTS or ElevenLabs.
+    """
+    from app.services.audio_service import audio_service
+    data = request.get_json() or {}
+    text = data.get("text", "Hello! This is a preview of your AI customer support voice on VoxAide.")
+    voice_model = data.get("voice_model", "en-US-JennyNeural")
+    provider = data.get("provider", "edge-tts")
+    elevenlabs_api_key = data.get("elevenlabs_api_key")
+
+    base_url = request.host_url.rstrip("/")
+    if request.headers.get("X-Forwarded-Proto") == "https" or "onrender.com" in request.host:
+        base_url = base_url.replace("http://", "https://")
+
+    preview_url = audio_service.generate_preview(
+        text=text,
+        voice_model=voice_model,
+        provider=provider,
+        elevenlabs_api_key=elevenlabs_api_key,
+        base_url=base_url
+    )
+
+    if not preview_url:
+        return jsonify({"success": False, "error": "Could not synthesize audio preview."}), 500
+
+    return jsonify({
+        "success": True,
+        "preview_url": preview_url,
+        "voice_model": voice_model,
+        "provider": provider
+    }), 200
