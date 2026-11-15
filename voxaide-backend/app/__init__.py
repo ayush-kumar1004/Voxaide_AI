@@ -212,12 +212,25 @@ def create_app():
             Active customer email: '{email}'
             Return raw JSON with: transcription, response, language.
             """
-            generative_model = genai.GenerativeModel(
-                "gemini-2.5-flash",
-                tools=[get_order_details, cancel_order]
-            )
-            chat = generative_model.start_chat(enable_automatic_function_calling=True)
-            gemini_response = chat.send_message([prompt, audio_payload])
+            model_candidates = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-2.5-flash"]
+            gemini_response = None
+            for model_name in model_candidates:
+                try:
+                    generative_model = genai.GenerativeModel(
+                        model_name,
+                        tools=[get_order_details, cancel_order]
+                    )
+                    chat = generative_model.start_chat(enable_automatic_function_calling=True)
+                    gemini_response = chat.send_message([prompt, audio_payload])
+                    break
+                except Exception as m_err:
+                    if "429" in str(m_err) or "quota" in str(m_err).lower() or "404" in str(m_err):
+                        continue
+                    raise m_err
+
+            if not gemini_response:
+                raise RuntimeError("All Gemini models rate-limited or unavailable.")
+
             response_text = gemini_response.text.strip()
 
             try:
@@ -238,7 +251,11 @@ def create_app():
             filename = f"response_{uuid.uuid4().hex}.mp3"
             filepath = os.path.join("static", "audio", filename)
             synthesize_speech(ai_reply, lang_code, filepath)
-            audio_url = f"{request.host_url}static/audio/{filename}"
+            
+            base_url = request.host_url.rstrip("/")
+            if request.headers.get("X-Forwarded-Proto") == "https" or "onrender.com" in request.host:
+                base_url = base_url.replace("http://", "https://")
+            audio_url = f"{base_url}/static/audio/{filename}"
 
             return jsonify({
                 'user_message': transcription,

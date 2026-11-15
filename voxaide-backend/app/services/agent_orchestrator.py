@@ -67,6 +67,51 @@ class AgentOrchestrator:
         self.knowledge_svc = knowledge_svc or knowledge_service
         self.tools = tools or tool_registry
 
+    def _extract_relevant_snippet(self, query: str, chunks: List[Dict[str, Any]]) -> str:
+        """
+        Extractive RAG fallback: extracts the most relevant sentences matching query keywords.
+        Ensures customer knowledge base queries are answered accurately even under external API rate limits.
+        """
+        if not chunks:
+            return ""
+
+        import re
+        stopwords = {
+            "a", "an", "the", "in", "on", "at", "to", "for", "of", "with", "is", "are", "was",
+            "were", "be", "been", "do", "does", "did", "have", "has", "had", "can", "could",
+            "will", "would", "shall", "should", "and", "or", "but", "so", "if", "what", "which",
+            "who", "whom", "this", "that", "these", "those", "am", "it", "its", "you", "your",
+            "i", "me", "my", "we", "our", "us", "they", "them", "their", "how", "why", "when", "where"
+        }
+
+        query_words = set(re.findall(r'\b[a-zA-Z0-9]+\b', query.lower())) - stopwords
+        if not query_words:
+            query_words = set(re.findall(r'\b[a-zA-Z0-9]+\b', query.lower()))
+
+        best_sentences = []
+        for chunk in chunks:
+            text = chunk.get("content") or chunk.get("text") or ""
+            if not text:
+                continue
+
+            # Split text into sentences
+            sentences = [s.strip() for s in re.split(r'(?<=[.!?\n])\s+', text) if len(s.strip()) > 10]
+            for s in sentences:
+                s_words = set(re.findall(r'\b[a-zA-Z0-9]+\b', s.lower()))
+                match_count = len(query_words.intersection(s_words))
+                if match_count > 0:
+                    best_sentences.append((match_count, s))
+
+        if best_sentences:
+            best_sentences.sort(key=lambda x: x[0], reverse=True)
+            # Pick top 2-3 most relevant sentences
+            selected = [s for _, s in best_sentences[:3]]
+            return " ".join(selected)
+
+        # Fallback to top chunk excerpt
+        top_text = chunks[0].get("content") or chunks[0].get("text") or ""
+        return top_text[:400].strip() + ("..." if len(top_text) > 400 else "")
+
     def process(self, request: AgentRequest) -> AgentResponse:
         start_time = time.time()
         logger.info(
@@ -207,11 +252,49 @@ class AgentOrchestrator:
 
         except Exception as e:
             logger.error("LLM generation failed in orchestrator", error=str(e), company_id=request.company_id)
-            reply_text = agent_config.escalation_message or (
-                "I apologize, but I am having trouble processing your request right now. "
-                "Let me connect you with a team member."
-            )
-            should_escalate = True
+
+            clean_query = request.message.lower().strip()
+            is_company_identity = any(k in clean_query for k in [
+                "company name", "which company", "what company", "who are you", "who am i speaking", "what is your name"
+            ])
+            is_greeting = any(clean_query.startswith(g) or clean_query == g for g in [
+                "hello", "hi", "hey", "good morning", "good afternoon", "good evening", "howdy", "greetings"
+            ])
+            is_hours_query = any(k in clean_query for k in [
+                "business hours", "what are your hours", "hours of operation", "when are you open", "timing", "schedule"
+            ])
+
+            if is_company_identity:
+                reply_text = (
+                    f"You have reached {company.name}. I am {agent_config.agent_name}, "
+                    f"your AI customer support assistant. How can I assist you today?"
+                )
+                should_escalate = False
+            elif is_hours_query and company.business_hours:
+                hours_desc = ", ".join(f"{d.replace('_', ' ').capitalize()}: {h}" for d, h in company.business_hours.items())
+                reply_text = f"{company.name}'s business hours are: {hours_desc}."
+                should_escalate = False
+            elif is_greeting and not retrieved_knowledge:
+                reply_text = (
+                    f"Hello! Welcome to {company.name}. I am {agent_config.agent_name}. "
+                    f"How can I assist you with our services, products, or questions today?"
+                )
+                should_escalate = False
+            elif retrieved_knowledge:
+                extracted_snippet = self._extract_relevant_snippet(request.message, retrieved_knowledge)
+                top_doc = retrieved_knowledge[0].get("document_name") or retrieved_knowledge[0].get("source") or "Knowledge Base"
+                reply_text = (
+                    f"Based on {company.name}'s knowledge base ({top_doc}):\n\n"
+                    f"{extracted_snippet}\n\n"
+                    f"Please let me know if you would like more details or if you would like to speak with our support team."
+                )
+                should_escalate = False
+            else:
+                reply_text = agent_config.escalation_message or (
+                    "I apologize, but I am having trouble processing your request right now. "
+                    "Let me connect you with a team member."
+                )
+                should_escalate = True
 
         # 11. Record assistant response to memory
         self.conversation_svc.add_message(

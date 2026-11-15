@@ -20,7 +20,10 @@ class ChromaVectorStore(VectorStore):
         self.persist_directory = persist_directory or os.path.join(base_dir, "data", "chroma")
         os.makedirs(self.persist_directory, exist_ok=True)
 
-        self.client = chromadb.PersistentClient(path=self.persist_directory)
+        self.client = chromadb.PersistentClient(
+            path=self.persist_directory,
+            settings=chromadb.config.Settings(anonymized_telemetry=False)
+        )
         self.embedding_provider = embedding_provider or GeminiEmbeddingProvider()
         self.collection_name = collection_name
         self.collection = self.client.get_or_create_collection(

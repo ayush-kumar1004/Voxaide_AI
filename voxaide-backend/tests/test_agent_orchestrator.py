@@ -172,3 +172,60 @@ def test_api_test_agent_endpoint(client, test_company):
     assert unauth_res.status_code == 403
     unauth_data = json.loads(unauth_res.data)
     assert unauth_data.get("code") == "TENANT_ACCESS_DENIED"
+
+def test_orchestrator_handles_company_identity_when_llm_fails(test_company):
+    """Verifies that company identity queries ('what is your company name?') succeed even under LLM rate limits."""
+    comp = test_company["company"]
+
+    class FailingLLM(LLMProvider):
+        def generate(self, *args, **kwargs):
+            raise RuntimeError("429 ResourceExhausted: Quota exceeded for model gemini")
+
+    custom_orchestrator = AgentOrchestrator(
+        llm_provider=FailingLLM(),
+        company_svc=company_service
+    )
+
+    req = AgentRequest(
+        company_id=comp.id,
+        message="Hello whats your company name?"
+    )
+    res = custom_orchestrator.process(req)
+    assert comp.name in res.text
+    assert res.should_escalate is False
+
+def test_orchestrator_extractive_knowledge_synthesis_when_llm_rate_limited(test_company):
+    """Verifies that uploaded knowledge chunks answer queries directly even when LLM API quota is exhausted."""
+    comp = test_company["company"]
+
+    class FailingLLM(LLMProvider):
+        def generate(self, *args, **kwargs):
+            raise RuntimeError("429 Quota limit exceeded for daily tier")
+
+    class MockKnowledgeService:
+        def search(self, company_id, query, top_k=4):
+            return [{
+                "document_id": "doc_aster_01",
+                "document_name": "AsterHome_Customer_Support_Knowledge_Base.txt",
+                "source": "AsterHome_Customer_Support_Knowledge_Base.txt",
+                "chunk_id": "chunk_01",
+                "relevance_score": 0.89,
+                "content": "AsterHome specializes in luxury home appliances including refrigerators and washing machines. We do not sell laptops, tablets, or personal computing devices."
+            }]
+
+    custom_orchestrator = AgentOrchestrator(
+        llm_provider=FailingLLM(),
+        company_svc=company_service,
+        knowledge_svc=MockKnowledgeService()
+    )
+
+    req = AgentRequest(
+        company_id=comp.id,
+        message="do you sell laptops?"
+    )
+    res = custom_orchestrator.process(req)
+    assert "AsterHome" in res.text
+    assert "laptops" in res.text.lower()
+    assert len(res.sources) == 1
+    assert res.sources[0]["document_name"] == "AsterHome_Customer_Support_Knowledge_Base.txt"
+    assert res.should_escalate is False

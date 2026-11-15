@@ -231,10 +231,15 @@ const CustomerChat = () => {
   };
 
   const playAudio = async (audioUrl?: string, fallbackText?: string) => {
-    if (audioUrl) {
+    let safeUrl = audioUrl;
+    if (safeUrl && window.location.protocol === "https:" && safeUrl.startsWith("http://")) {
+      safeUrl = safeUrl.replace("http://", "https://");
+    }
+
+    if (safeUrl) {
       try {
         setIsPlaying(true);
-        const audio = new Audio(audioUrl);
+        const audio = new Audio(safeUrl);
         audio.onended = () => setIsPlaying(false);
         audio.onerror = () => {
           setIsPlaying(false);
