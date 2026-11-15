@@ -77,15 +77,21 @@ class KnowledgeService:
         doc.status = "indexed"
         doc.processed_at = datetime.now(timezone.utc).isoformat()
 
-        # 6. Persist document metadata
+        # 6. Persist document metadata and chunk payload to survive container restarts
+        doc_dict = doc.model_dump()
+        doc_dict["chunks_payload"] = [
+            {"id": c["id"], "text": c["text"], "chunk_index": c["chunk_index"], "metadata": c["metadata"]}
+            for c in chunk_objects
+        ]
+
         db = get_firestore_client()
         if db:
             try:
-                db.collection("documents").document(doc.id).set(doc.model_dump())
+                db.collection("documents").document(doc.id).set(doc_dict)
             except Exception as e:
                 logger.error("Error saving document to Firestore", error=str(e), doc_id=doc.id)
 
-        self._docs_mem[doc.id] = doc.model_dump()
+        self._docs_mem[doc.id] = doc_dict
         logger.info(
             "Document ingested and indexed successfully",
             company_id=company_id,
@@ -153,6 +159,28 @@ class KnowledgeService:
         logger.info("Document deleted from knowledge base", company_id=company_id, document_id=document_id)
         return True
 
+    def _maybe_rehydrate_from_firestore(self, company_id: str) -> bool:
+        """Restores indexed vector chunks into ChromaDB if container was restarted."""
+        db = get_firestore_client()
+        if not db:
+            return False
+
+        try:
+            records = db.collection("documents").where("company_id", "==", company_id).get()
+            total_added = 0
+            for r in records:
+                d = r.to_dict()
+                chunks = d.get("chunks_payload") or []
+                if chunks:
+                    self.vector_store.add_documents(company_id=company_id, documents=chunks)
+                    total_added += len(chunks)
+            if total_added > 0:
+                logger.info(f"Re-hydrated {total_added} chunks into ChromaDB from Firestore for company {company_id}")
+                return True
+        except Exception as e:
+            logger.warning("Could not re-hydrate documents from Firestore", error=str(e))
+        return False
+
     def search(
         self,
         company_id: str,
@@ -169,11 +197,21 @@ class KnowledgeService:
         if not query or not query.strip():
             return []
 
-        return self.vector_store.similarity_search(
+        results = self.vector_store.similarity_search(
             company_id=company_id,
             query=query,
             top_k=top_k
         )
+
+        if not results:
+            if self._maybe_rehydrate_from_firestore(company_id):
+                results = self.vector_store.similarity_search(
+                    company_id=company_id,
+                    query=query,
+                    top_k=top_k
+                )
+
+        return results
 
 # Global knowledge service instance
 knowledge_service = KnowledgeService()
